@@ -59,6 +59,41 @@ under the License.
 			<version>${project.version}</version>
 			<scope>test</scope>
 		</dependency>
+
+
+		<dependency>
+			<groupId>org.apache.thrift</groupId>
+			<artifactId>libthrift</artifactId>
+			<version>0.9.2</version>
+		</dependency>
+
+
+		<dependency>
+			<groupId>com.twitter</groupId>
+			<artifactId>parquet-common</artifactId>
+			<version>1.0.0</version>
+		</dependency>
+		<dependency>
+			<groupId>com.twitter</groupId>
+			<artifactId>parquet-encoding</artifactId>
+			<version>1.0.0</version>
+		</dependency>
+		<dependency>
+			<groupId>com.twitter</groupId>
+			<artifactId>parquet-column</artifactId>
+			<version>1.0.0</version>
+		</dependency>
+		<dependency>
+			<groupId>com.twitter</groupId>
+			<artifactId>parquet-hadoop</artifactId>
+			<version>1.0.0</version>
+		</dependency>
+		<dependency>
+			<groupId>com.twitter</groupId>
+			<artifactId>parquet-thrift</artifactId>
+			<version>1.0.0</version>
+		</dependency>
+
 	</dependencies>
 
 	<profiles>
