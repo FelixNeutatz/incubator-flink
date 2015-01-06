@@ -127,7 +127,7 @@ public class HadoopInputFormat<K extends Writable, V extends Writable> implement
 					return getFileStats(cachedFileStats, paths, new ArrayList<FileStatus>(1));
 				} catch (IOException ioex) {
 					if (LOG.isWarnEnabled()) {
-						LOG.warn("Could not determine statistics due to an io error: "
+						LOG.warn("Could not determine statistics due to an io error: " 
 								+ ioex.getMessage());
 					}
 				} catch (Throwable t) {
@@ -239,7 +239,7 @@ public class HadoopInputFormat<K extends Writable, V extends Writable> implement
 	// --------------------------------------------------------------------------------------------
 	
 	private FileBaseStatistics getFileStats(FileBaseStatistics cachedStats, org.apache.hadoop.fs.Path[] hadoopFilePaths,
-			ArrayList<FileStatus> files) throws IOException {
+ArrayList<FileStatus> files) throws IOException {
 		
 		long latestModTime = 0L;
 		
