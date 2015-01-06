@@ -40,7 +40,7 @@ import org.apache.hadoop.mapreduce.TaskAttemptID;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputCommitter;
 
 
-public class HadoopOutputFormat<K extends Writable,V extends Writable> implements OutputFormat<Tuple2<K, V>>, FinalizeOnMaster {
+public class HadoopOutputFormat<K,V> implements OutputFormat<Tuple2<K, V>>, FinalizeOnMaster {
 	
 	private static final long serialVersionUID = 1L;
 	

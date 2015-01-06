@@ -18,21 +18,14 @@
 
 package org.apache.flink.hadoopcompatibility.mapreduce.example;
 
-import org.apache.flink.api.common.typeinfo.TypeInformation;
-import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.DataSet;
 import org.apache.flink.api.java.ExecutionEnvironment;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.api.java.typeutils.TupleTypeInfo;
-import org.apache.flink.api.java.typeutils.runtime.KryoSerializer;
-import org.apache.flink.hadoopcompatibility.mapreduce.FlinkParquetInputFormat;
 import org.apache.flink.hadoopcompatibility.mapreduce.HadoopInputFormat;
 import org.apache.flink.hadoopcompatibility.mapreduce.example.thrift.AminoAcid;
-import org.apache.flink.hadoopcompatibility.mapreduce.example.thrift.AminoAcidType;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.mapreduce.Job;
-import org.apache.thrift.TBase;
 import parquet.hadoop.thrift.ParquetThriftInputFormat;
 
 /**
@@ -50,20 +43,13 @@ public class ParquetInput {
         final ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
         env.setDegreeOfParallelism(1);
 
-        // Set up the Hadoop Input Format
         Job job = Job.getInstance();
 
-
-        FlinkParquetInputFormat hadoopInputFormat = new FlinkParquetInputFormat(new ParquetThriftInputFormat(), AminoAcid.class, job);
-        //HadoopInputFormat hadoopInputFormat = new HadoopInputFormat(new ParquetThriftInputFormat(), Void.class, AminoAcid.class, job);
+        HadoopInputFormat hadoopInputFormat = new HadoopInputFormat(new ParquetThriftInputFormat(), Void.class, AminoAcid.class, job);
 
         ParquetThriftInputFormat.addInputPath(job, new Path("newpath"));
         ParquetThriftInputFormat.setReadSupportClass(job, AminoAcid.class);
 
-
-
-
-       // Create a Flink job with it, Void.class
 
         DataSet<Tuple2<LongWritable, AminoAcid>> data = env.createInput(hadoopInputFormat);
 

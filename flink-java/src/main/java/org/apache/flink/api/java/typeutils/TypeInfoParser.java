@@ -37,13 +37,13 @@ public class TypeInfoParser {
 	private static final Pattern tuplePattern = Pattern.compile("^((" + TUPLE_PACKAGE.replaceAll("\\.", "\\\\.") + "\\.)?Tuple[0-9]+)<");
 	private static final Pattern writablePattern = Pattern.compile("^((" + WRITABLE_PACKAGE.replaceAll("\\.", "\\\\.") + "\\.)?Writable)<([^\\s,>]*)(,|>|$)");
 	private static final Pattern basicTypePattern = Pattern
-			.compile("^((java\\.lang\\.)?(String|Integer|Byte|Short|Character|Double|Float|Long|Boolean))(,|>|$)");
-	private static final Pattern basicType2Pattern = Pattern.compile("^(int|byte|short|char|double|float|long|boolean)(,|>|$)");
+			.compile("^((java\\.lang\\.)?(String|Integer|Byte|Short|Character|Double|Float|Long|Boolean|Void))(,|>|$)");
+	private static final Pattern basicType2Pattern = Pattern.compile("^(int|byte|short|char|double|float|long|boolean|void)(,|>|$)");
 	private static final Pattern valueTypePattern = Pattern.compile("^((" + VALUE_PACKAGE.replaceAll("\\.", "\\\\.")
 			+ "\\.)?(String|Int|Byte|Short|Char|Double|Float|Long|Boolean|List|Map|Null))Value(,|>|$)");
 	private static final Pattern basicArrayTypePattern = Pattern
-			.compile("^((java\\.lang\\.)?(String|Integer|Byte|Short|Character|Double|Float|Long|Boolean))\\[\\](,|>|$)");
-	private static final Pattern basicArrayType2Pattern = Pattern.compile("^(int|byte|short|char|double|float|long|boolean)\\[\\](,|>|$)");
+			.compile("^((java\\.lang\\.)?(String|Integer|Byte|Short|Character|Double|Float|Long|Boolean|Void))\\[\\](,|>|$)");
+	private static final Pattern basicArrayType2Pattern = Pattern.compile("^(int|byte|short|char|double|float|long|boolean|void)\\[\\](,|>|$)");
 	private static final Pattern customObjectPattern = Pattern.compile("^([^\\s,>]+)(,|>|$)");
 
 	/**
@@ -208,6 +208,8 @@ public class TypeInfoParser {
 				clazz = Long.class;
 			} else if (className.equals("boolean")) {
 				clazz = Boolean.class;
+			} else if (className.equals("void")) {
+				clazz = Void.class;
 			}
 			returnType = BasicTypeInfo.getInfoFor(clazz);
 		}

@@ -18,17 +18,24 @@
 
 package org.apache.flink.hadoopcompatibility.mapreduce.example;
 
+import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.api.java.typeutils.TupleTypeInfo;
+import org.apache.flink.api.java.typeutils.TypeExtractor;
+import org.apache.flink.hadoopcompatibility.mapreduce.HadoopOutputFormat;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.flink.api.java.DataSet;
 import org.apache.flink.api.java.ExecutionEnvironment;
-import org.apache.flink.hadoopcompatibility.mapreduce.FlinkParquetOutputFormat;
 import parquet.hadoop.metadata.CompressionCodecName;
 import parquet.hadoop.thrift.ParquetThriftOutputFormat;
 import org.apache.flink.hadoopcompatibility.mapreduce.example.thrift.AminoAcid;
 import org.apache.flink.hadoopcompatibility.mapreduce.example.thrift.AminoAcidType;
+
+import java.util.Arrays;
+import java.util.List;
+
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 
 /**
  * Implements a word count which takes the input file and counts the number of
@@ -55,16 +62,14 @@ public class ParquetOutput {
         aa.setAbbreviation("FN");
 
 
+        List l = Arrays.asList(new Tuple2<Void,AminoAcid>(null, aa));
+        TypeInformation t = new TupleTypeInfo<Tuple2<Void,AminoAcid>>(TypeExtractor.getForClass(Void.class), TypeExtractor.getForClass(AminoAcid.class));
 
-        LongWritable lw = new LongWritable(1L);
-        DataSet<Tuple2<LongWritable,AminoAcid>> data = env.fromElements(new Tuple2<LongWritable,AminoAcid>(lw, aa));
-
-
-        //DataSet<Tuple2<Void,AminoAcid>> data = env.fromElements(new Tuple2<Void,AminoAcid>(null, aa));
+        DataSet<Tuple2<Void,AminoAcid>> data = env.fromCollection(l,t);
 
 
         // Set up Hadoop Output Format
-        FlinkParquetOutputFormat hadoopOutputFormat = new FlinkParquetOutputFormat(new ParquetThriftOutputFormat(), job);
+        HadoopOutputFormat hadoopOutputFormat = new HadoopOutputFormat(new ParquetThriftOutputFormat(), job);
 
         hadoopOutputFormat.getConfiguration().set("mapreduce.output.textoutputformat.separator", " ");
         hadoopOutputFormat.getConfiguration().set("mapred.textoutputformat.separator", " ");
@@ -78,6 +83,7 @@ public class ParquetOutput {
 
         // Output & Execute
         data.output(hadoopOutputFormat);
+
         env.execute("Word Count");
     }
 
