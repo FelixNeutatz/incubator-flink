@@ -143,14 +143,14 @@ public class FlinkParquetInputFormat<K extends Writable, V extends Writable> imp
 	public HadoopInputSplit[] createInputSplits(int minNumSplits)
 			throws IOException {
 		configuration.setInt("mapreduce.input.fileinputformat.split.minsize", minNumSplits);
-		
+
 		JobContext jobContext = null;
 		try {
 			jobContext = HadoopUtils.instantiateJobContext(configuration, new JobID());
 		} catch (Exception e) {
 			throw new RuntimeException(e);
 		}
-		
+
 		List<org.apache.hadoop.mapreduce.InputSplit> splits;
 		try {
 			splits = this.mapreduceInputFormat.getSplits(jobContext);
@@ -158,9 +158,9 @@ public class FlinkParquetInputFormat<K extends Writable, V extends Writable> imp
 			throw new IOException("Could not get Splits.", e);
 		}
 		HadoopInputSplit[] hadoopInputSplits = new HadoopInputSplit[splits.size()];
-		
+
 		for(int i = 0; i < hadoopInputSplits.length; i++){
-			hadoopInputSplits[i] = new HadoopInputSplit(splits.get(i), jobContext);
+			hadoopInputSplits[i] = new HadoopInputSplit(i, splits.get(i), jobContext);
 		}
 		return hadoopInputSplits;
 	}
