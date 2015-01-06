@@ -44,6 +44,7 @@ import org.apache.flink.api.java.tuple.Tuple1;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.tuple.Tuple9;
+import org.apache.flink.api.java.typeutils.EnumTypeInfo;
 import org.apache.flink.api.java.typeutils.ObjectArrayTypeInfo;
 import org.apache.flink.api.java.typeutils.PojoTypeInfo;
 import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
@@ -60,7 +61,6 @@ import org.apache.flink.types.Value;
 import org.apache.flink.util.Collector;
 import org.apache.hadoop.io.Writable;
 import org.junit.Assert;
-import org.junit.Ignore;
 import org.junit.Test;
 
 
@@ -1533,5 +1533,95 @@ public class TypeExtractorTest {
 		TupleTypeInfo<?> tti = (TupleTypeInfo<?>) ti;
 		Assert.assertEquals(BasicTypeInfo.STRING_TYPE_INFO, tti.getTypeAt(0));
 		Assert.assertEquals(BasicTypeInfo.STRING_TYPE_INFO, tti.getTypeAt(1));
+	}
+	
+	public static class Edge<K, V> extends Tuple3<K, K, V> {
+		private static final long serialVersionUID = 1L;
+		
+	}
+	
+	public static class EdgeMapper<K, V> implements MapFunction<Edge<K, V>, Edge<K, V>> {
+		private static final long serialVersionUID = 1L;
+		
+		@Override
+		public Edge<K, V> map(Edge<K, V> value) throws Exception {
+			return null;
+		}
+		
+	}
+	
+	@SuppressWarnings({ "unchecked", "rawtypes" })
+	@Test
+	public void testInputInference1() {
+		EdgeMapper<String, Double> em = new EdgeMapper<String, Double>();
+		TypeInformation<?> ti = TypeExtractor.getMapReturnTypes((MapFunction) em, TypeInfoParser.parse("Tuple3<String, String, Double>"));
+		Assert.assertTrue(ti.isTupleType());
+		Assert.assertEquals(3, ti.getArity());
+		TupleTypeInfo<?> tti = (TupleTypeInfo<?>) ti;
+		Assert.assertEquals(BasicTypeInfo.STRING_TYPE_INFO, tti.getTypeAt(0));
+		Assert.assertEquals(BasicTypeInfo.STRING_TYPE_INFO, tti.getTypeAt(1));
+		Assert.assertEquals(BasicTypeInfo.DOUBLE_TYPE_INFO, tti.getTypeAt(2));
+	}
+	
+	public static class EdgeMapper2<V> implements MapFunction<V, Edge<Long, V>> {
+		private static final long serialVersionUID = 1L;
+		
+		@Override
+		public Edge<Long, V> map(V value) throws Exception {
+			return null;
+		}
+		
+	}
+	
+	@SuppressWarnings({ "unchecked", "rawtypes" })
+	@Test
+	public void testInputInference2() {
+		EdgeMapper2<Boolean> em = new EdgeMapper2<Boolean>();
+		TypeInformation<?> ti = TypeExtractor.getMapReturnTypes((MapFunction) em, TypeInfoParser.parse("Boolean"));
+		Assert.assertTrue(ti.isTupleType());
+		Assert.assertEquals(3, ti.getArity());
+		TupleTypeInfo<?> tti = (TupleTypeInfo<?>) ti;
+		Assert.assertEquals(BasicTypeInfo.LONG_TYPE_INFO, tti.getTypeAt(0));
+		Assert.assertEquals(BasicTypeInfo.LONG_TYPE_INFO, tti.getTypeAt(1));
+		Assert.assertEquals(BasicTypeInfo.BOOLEAN_TYPE_INFO, tti.getTypeAt(2));
+	}
+	
+	public static class EdgeMapper3<K, V> implements MapFunction<Edge<K, V>, V> {
+		private static final long serialVersionUID = 1L;
+		
+		@Override
+		public V map(Edge<K, V> value) throws Exception {
+			return null;
+		}
+	}
+	
+	@SuppressWarnings({ "unchecked", "rawtypes" })
+	@Test
+	public void testInputInference3() {
+		EdgeMapper3<Boolean, String> em = new EdgeMapper3<Boolean, String>();
+		TypeInformation<?> ti = TypeExtractor.getMapReturnTypes((MapFunction) em, TypeInfoParser.parse("Tuple3<Boolean,Boolean,String>"));
+		Assert.assertTrue(ti.isBasicType());
+		Assert.assertEquals(BasicTypeInfo.STRING_TYPE_INFO, ti);
+	}
+	
+	public static enum MyEnum {
+		ONE, TWO, THREE
+	}
+	
+	@SuppressWarnings({ "unchecked", "rawtypes" })
+	@Test
+	public void testEnumType() {
+		MapFunction<?, ?> mf = new MapFunction<MyEnum, MyEnum>() {
+			private static final long serialVersionUID = 1L;
+
+			@Override
+			public MyEnum map(MyEnum value) throws Exception {
+				return null;
+			}
+		};
+		
+		TypeInformation<?> ti = TypeExtractor.getMapReturnTypes((MapFunction) mf, new EnumTypeInfo(MyEnum.class));
+		Assert.assertTrue(ti instanceof EnumTypeInfo);
+		Assert.assertEquals(ti.getTypeClass(), MyEnum.class);
 	}
 }

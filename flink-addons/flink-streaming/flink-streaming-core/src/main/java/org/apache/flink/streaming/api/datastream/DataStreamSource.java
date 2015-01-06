@@ -17,22 +17,31 @@
 
 package org.apache.flink.streaming.api.datastream;
 
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.util.serialization.TypeWrapper;
 
 /**
  * The DataStreamSource represents the starting point of a DataStream.
- *
+ * 
  * @param <OUT>
  *            Type of the DataStream created.
  */
 public class DataStreamSource<OUT> extends SingleOutputStreamOperator<OUT, DataStreamSource<OUT>> {
 
-	public DataStreamSource(StreamExecutionEnvironment environment, String operatorType, TypeWrapper<OUT> outTypeWrapper) {
-		super(environment, operatorType, outTypeWrapper);
+	boolean isParallel;
+
+	public DataStreamSource(StreamExecutionEnvironment environment, String operatorType,
+			TypeInformation<OUT> outTypeInfo, boolean isParallel) {
+		super(environment, operatorType, outTypeInfo);
+		this.isParallel = isParallel;
 	}
 
-	public DataStreamSource(DataStream<OUT> dataStream) {
-		super(dataStream);
+	@Override
+	public DataStreamSource<OUT> setParallelism(int dop) {
+		if (dop > 1 && !isParallel) {
+			throw new IllegalArgumentException("Source: " + this.id + " is not a parallel source");
+		} else {
+			return (DataStreamSource<OUT>) super.setParallelism(dop);
+		}
 	}
 }

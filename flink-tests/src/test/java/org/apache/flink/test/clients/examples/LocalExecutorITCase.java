@@ -51,9 +51,10 @@ public class LocalExecutorITCase {
 			LocalExecutor executor = new LocalExecutor();
 			executor.setDefaultOverwriteFiles(true);
 			executor.setTaskManagerNumSlots(DOP);
+			executor.setPrintStatusDuringExecution(false);
 			executor.start();
 			
-			executor.executePlan(wc.getPlan(new Integer(DOP).toString(), inFile.toURI().toString(),
+			executor.executePlan(wc.getPlan(Integer.valueOf(DOP).toString(), inFile.toURI().toString(),
 					outFile.toURI().toString()));
 			executor.stop();
 		} catch (Exception e) {

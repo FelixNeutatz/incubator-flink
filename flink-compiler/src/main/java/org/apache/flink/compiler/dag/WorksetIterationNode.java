@@ -290,6 +290,16 @@ public class WorksetIterationNode extends TwoInputNode implements IterationNode 
 		this.input1.setInterestingProperties(partitionedIP);
 	}
 	
+	@Override
+	public void clearInterestingProperties() {
+		super.clearInterestingProperties();
+		
+		this.nextWorksetRootConnection.clearInterestingProperties();
+		this.solutionSetDeltaRootConnection.clearInterestingProperties();
+		
+		this.nextWorkset.accept(InterestingPropertiesClearer.INSTANCE);
+		this.solutionSetDelta.accept(InterestingPropertiesClearer.INSTANCE);
+	}
 	
 	@Override
 	protected void instantiate(OperatorDescriptorDual operator, Channel solutionSetIn, Channel worksetIn,
@@ -504,6 +514,12 @@ public class WorksetIterationNode extends TwoInputNode implements IterationNode 
 		}
 		
 		@Override
+		public boolean areCompatible(RequestedGlobalProperties requested1, RequestedGlobalProperties requested2,
+				GlobalProperties produced1, GlobalProperties produced2) {
+			return true;
+		}
+		
+		@Override
 		public boolean areCoFulfilled(RequestedLocalProperties requested1, RequestedLocalProperties requested2,
 				LocalProperties produced1, LocalProperties produced2) {
 			return true;
@@ -552,6 +568,5 @@ public class WorksetIterationNode extends TwoInputNode implements IterationNode 
 		protected void computeOperatorSpecificDefaultEstimates(DataStatistics statistics) {
 			// no estimates are needed here
 		}
-
 	}
 }

@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.concurrent.atomic.AtomicReference;
 
+import akka.actor.ActorRef;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.blob.BlobKey;
 import org.apache.flink.runtime.broadcast.BroadcastVariableManager;
@@ -39,7 +40,6 @@ import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.jobgraph.tasks.AbstractInvokable;
 import org.apache.flink.runtime.jobgraph.tasks.InputSplitProvider;
 import org.apache.flink.runtime.memorymanager.MemoryManager;
-import org.apache.flink.runtime.protocols.AccumulatorProtocol;
 import org.apache.flink.util.ExceptionUtils;
 import org.junit.Test;
 import org.mockito.Matchers;
@@ -265,7 +265,7 @@ public class TaskTest {
 			
 			RuntimeEnvironment env = new RuntimeEnvironment(task, tdd, getClass().getClassLoader(),
 					mock(MemoryManager.class), mock(IOManager.class), mock(InputSplitProvider.class),
-					mock(AccumulatorProtocol.class), new BroadcastVariableManager());
+					mock(ActorRef.class), new BroadcastVariableManager());
 			
 			task.setEnvironment(env);
 			
@@ -303,7 +303,7 @@ public class TaskTest {
 			
 			RuntimeEnvironment env = new RuntimeEnvironment(task, tdd, getClass().getClassLoader(),
 					mock(MemoryManager.class), mock(IOManager.class), mock(InputSplitProvider.class),
-					mock(AccumulatorProtocol.class), new BroadcastVariableManager());
+					mock(ActorRef.class), new BroadcastVariableManager());
 			
 			task.setEnvironment(env);
 			

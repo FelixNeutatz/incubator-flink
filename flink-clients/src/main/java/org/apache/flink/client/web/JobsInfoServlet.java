@@ -22,20 +22,24 @@ package org.apache.flink.client.web;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.net.InetSocketAddress;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Iterator;
+import java.util.concurrent.TimeUnit;
 
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import akka.actor.ActorRef;
+import akka.actor.ActorSystem;
 import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.runtime.event.job.RecentJobEvent;
-import org.apache.flink.runtime.ipc.RPC;
-import org.apache.flink.runtime.net.NetUtils;
-import org.apache.flink.runtime.protocols.ExtendedManagementProtocol;
+import org.apache.flink.runtime.akka.AkkaUtils;
+import org.apache.flink.runtime.executiongraph.ExecutionGraph;
+import org.apache.flink.runtime.jobmanager.JobManager;
+import org.apache.flink.runtime.messages.JobManagerMessages.RequestRunningJobs$;
+import org.apache.flink.runtime.messages.JobManagerMessages.RunningJobs;
+import scala.concurrent.duration.FiniteDuration;
 
 
 public class JobsInfoServlet extends HttpServlet {
@@ -47,40 +51,51 @@ public class JobsInfoServlet extends HttpServlet {
 	// ------------------------------------------------------------------------
 
 	private final Configuration config;
+
+	private final ActorSystem system;
+
+	private final FiniteDuration timeout;
 	
-	public JobsInfoServlet(Configuration nepheleConfig) {
-		this.config = nepheleConfig;
+	public JobsInfoServlet(Configuration flinkConfig) {
+		this.config = flinkConfig;
+		system = ActorSystem.create("JobsInfoServletActorSystem",
+				AkkaUtils.getDefaultActorSystemConfig());
+		this.timeout = new FiniteDuration(flinkConfig.getInteger(ConfigConstants
+				.AKKA_ASK_TIMEOUT, ConfigConstants.DEFAULT_AKKA_ASK_TIMEOUT), TimeUnit.SECONDS);
 	}
 
 	@Override
 	protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
 		//resp.setContentType("application/json");
 		
-		ExtendedManagementProtocol jmConn = null;
 		try {
-			
-			jmConn = getJMConnection();
-			List<RecentJobEvent> recentJobs = jmConn.getRecentJobs();
-			
-			ArrayList<RecentJobEvent> jobs = new ArrayList<RecentJobEvent>(recentJobs);
-			
+			String jmHost = config.getString(ConfigConstants.JOB_MANAGER_IPC_ADDRESS_KEY, null);
+			int jmPort = config.getInteger(ConfigConstants.JOB_MANAGER_IPC_PORT_KEY,
+					ConfigConstants.DEFAULT_JOB_MANAGER_IPC_PORT);
+
+			ActorRef jm = JobManager.getJobManager(new InetSocketAddress(jmHost, jmPort), system,
+					timeout);
+
+			Iterator<ExecutionGraph> graphs = AkkaUtils.<RunningJobs>ask(jm,
+					RequestRunningJobs$.MODULE$, timeout).asJavaIterable().iterator();
+
+
 			resp.setStatus(HttpServletResponse.SC_OK);
 			PrintWriter wrt = resp.getWriter();
 			wrt.write("[");
-			for (int i = 0; i < jobs.size(); i++) {
-				RecentJobEvent jobEvent = jobs.get(i);
-				
+			while(graphs.hasNext()){
+				ExecutionGraph graph = graphs.next();
 				//Serialize job to json
 				wrt.write("{");
-				wrt.write("\"jobid\": \"" + jobEvent.getJobID() + "\",");
-				if(jobEvent.getJobName() != null) {
-					wrt.write("\"jobname\": \"" + jobEvent.getJobName()+"\",");
+				wrt.write("\"jobid\": \"" + graph.getJobID() + "\",");
+				if(graph.getJobName() != null) {
+					wrt.write("\"jobname\": \"" + graph.getJobName()+"\",");
 				}
-				wrt.write("\"status\": \""+ jobEvent.getJobStatus() + "\",");
-				wrt.write("\"time\": " + jobEvent.getTimestamp());
+				wrt.write("\"status\": \""+ graph.getState() + "\",");
+				wrt.write("\"time\": " + graph.getStatusTimestamp(graph.getState()));
 				wrt.write("}");
 				//Write seperator between json objects
-				if(i != jobs.size() - 1) {
+				if(graphs.hasNext()) {
 					wrt.write(",");
 				}
 			}
@@ -89,30 +104,7 @@ public class JobsInfoServlet extends HttpServlet {
 		} catch (Throwable t) {
 			resp.setStatus(HttpServletResponse.SC_BAD_REQUEST);
 			resp.getWriter().print(t.getMessage());
-		} finally {
-			if (jmConn != null) {
-				try {
-					RPC.stopProxy(jmConn);
-				} catch (Throwable t) {
-					System.err.println("Could not cleanly shut down connection from compiler to job manager");
-				}
-			}
-			jmConn = null;
 		}
-	}
-	
-	/**
-	 * Sets up a connection to the JobManager.
-	 * 
-	 * @return Connection to the JobManager.
-	 * @throws IOException
-	 */
-	private ExtendedManagementProtocol getJMConnection() throws IOException {
-		String jmHost = config.getString(ConfigConstants.JOB_MANAGER_IPC_ADDRESS_KEY, null);
-		String jmPort = config.getString(ConfigConstants.JOB_MANAGER_IPC_PORT_KEY, null);
-		
-		return RPC.getProxy(ExtendedManagementProtocol.class,
-				new InetSocketAddress(jmHost, Integer.parseInt(jmPort)), NetUtils.getSocketFactory());
 	}
 
 	protected String escapeString(String str) {

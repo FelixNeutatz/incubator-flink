@@ -1,6 +1,24 @@
 ---
 title: "Flink Programming Guide"
 ---
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
 
 * This will be replaced by the TOC
 {:toc}
@@ -229,7 +247,7 @@ DataSet<String> text = env.readTextFile("file:///path/to/file");
 
 This will give you a DataSet on which you can then apply transformations. For
 more information on data sources and input formats, please refer to
-[Data Sources](#data_sources).
+[Data Sources](#data-sources).
 
 Once you have a DataSet you can apply transformations to create a new
 DataSet which you can then write to a file, transform again, or
@@ -269,7 +287,7 @@ a cluster, the result goes to the standard out stream of the cluster nodes and e
 up in the *.out* files of the workers).
 The first two do as the name suggests, the third one can be used to specify a
 custom data output format. Please refer
-to [Data Sinks](#data_sinks) for more information on writing to files and also
+to [Data Sinks](#data-sinks) for more information on writing to files and also
 about custom data output formats.
 
 Once you specified the complete program you need to call `execute` on
@@ -329,7 +347,7 @@ val text = env.readTextFile("file:///path/to/file")
 
 This will give you a DataSet on which you can then apply transformations. For
 more information on data sources and input formats, please refer to
-[Data Sources](#data_sources).
+[Data Sources](#data-sources).
 
 Once you have a DataSet you can apply transformations to create a new
 DataSet which you can then write to a file, transform again, or
@@ -370,7 +388,7 @@ a cluster, the result goes to the standard out stream of the cluster nodes and e
 up in the *.out* files of the workers).
 The first two do as the name suggests, the third one can be used to specify a
 custom data output format. Please refer
-to [Data Sinks](#data_sinks) for more information on writing to files and also
+to [Data Sinks](#data-sinks) for more information on writing to files and also
 about custom data output formats.
 
 Once you specified the complete program you need to call `execute` on
@@ -655,7 +673,7 @@ The following transformations are available on data sets of Tuples:
         <p>Selects a subset of fields from the tuples</p>
 {% highlight java %}
 DataSet<Tuple3<Integer, Double, String>> in = // [...]
-DataSet<Tuple2<String, Integer>> out = in.project(2,0).types(String.class, Integer.class);
+DataSet<Tuple2<String, Integer>> out = in.project(2,0);
 {% endhighlight %}
       </td>
     </tr>
@@ -840,9 +858,9 @@ val result3 = in.groupBy(0).sortGroup(1, Order.ASCENDING).first(3)
 </div>
 </div>
 
-The [parallelism](#parallelism) of a transformation can be defined by `setParallelism(int)` while
+The [parallelism](#parallel-execution) of a transformation can be defined by `setParallelism(int)` while
 `name(String)` assigns a custom name to a transformation which is helpful for debugging. The same is
-possible for [Data Sources](#data_sources) and [Data Sinks](#data_sinks).
+possible for [Data Sources](#data-sources) and [Data Sinks](#data-sinks).
 
 [Back to Top](#top)
 
@@ -1297,10 +1315,10 @@ Rich functions provide, in addition to the user-defined function (map,
 reduce, etc), four methods: `open`, `close`, `getRuntimeContext`, and
 `setRuntimeContext`. These are useful for creating and finalizing
 local state, accessing broadcast variables (see
-[Broadcast Variables](#broadcast_variables), and for accessing runtime
+[Broadcast Variables](#broadcast-variables), and for accessing runtime
 information such as accumulators and counters (see
-[Accumulators and Counters](#accumulators_counters), and information
-on iterations (see [Iterations](#iterations)).
+[Accumulators and Counters](#accumulators--counters), and information
+on iterations (see [Iterations](iterations.html)).
 
 In particular for the `reduceGroup` transformation, using a rich
 function is the only way to define an optional `combine` function. See
@@ -1566,7 +1584,7 @@ Data Sources
 <div data-lang="java" markdown="1">
 
 Data sources create the initial data sets, such as from files or from Java collections. The general
-mechanism of of creating data sets is abstracted behind an
+mechanism of creating data sets is abstracted behind an
 {% gh_link /flink-core/src/main/java/org/apache/flink/api/common/io/InputFormat.java "InputFormat"%}.
 Flink comes
 with several built-in formats to create data sets from common file formats. Many of them have
@@ -1580,6 +1598,7 @@ File-based:
 - `readCsvFile(path)` / `CsvInputFormat` - Parses files of comma (or another char) delimited fields.
   Returns a DataSet of tuples. Supports the basic java types and their Value counterparts as field
   types.
+- `readFileOfPrimitives(path, Class)` / `PrimitiveInputFormat` - Parses files of new-line (or another char sequence) delimited primitive data types such as `String` or `Integer`. 
 
 Collection-based:
 
@@ -1643,11 +1662,30 @@ DataSet<Tuple2<String, Integer> dbData =
 // manually provide the type information as shown in the examples above.
 {% endhighlight %}
 
+#### Recursive Traversal of the Input Path Directory
+
+For file-based inputs, when the input path is a directory, nested files are not enumerated by default. Instead, only the files inside the base directory are read, while nested files are ignored. Recursive enumeration of nested files can be enabled through the `recursive.file.enumeration` configuration parameter, like in the following example.
+
+{% highlight java %}
+// enable recursive enumeration of nested input files
+ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
+
+// create a configuration object
+Configuration parameters = new Configuration();
+
+// set the recursive enumeration parameter
+parameters.setBoolean("recursive.file.enumeration", true);
+
+// pass the configuration to the data source
+DataSet<String> logs = env.readTextFile("file:///path/with.nested/files")
+			  .withParameters(parameters);
+{% endhighlight %}
+
 </div>
 <div data-lang="scala" markdown="1">
 
 Data sources create the initial data sets, such as from files or from Java collections. The general
-mechanism of of creating data sets is abstracted behind an
+mechanism of creating data sets is abstracted behind an
 {% gh_link /flink-core/src/main/java/org/apache/flink/api/common/io/InputFormat.java "InputFormat"%}.
 Flink comes
 with several built-in formats to create data sets from common file formats. Many of them have
@@ -1711,9 +1749,27 @@ val values = env.fromElements("Foo", "bar", "foobar", "fubar")
 // generate a number sequence
 val numbers = env.generateSequence(1, 10000000);
 {% endhighlight %}
-</div>
-</div>
 
+#### Recursive Traversal of the Input Path Directory
+
+For file-based inputs, when the input path is a directory, nested files are not enumerated by default. Instead, only the files inside the base directory are read, while nested files are ignored. Recursive enumeration of nested files can be enabled through the `recursive.file.enumeration` configuration parameter, like in the following example.
+
+{% highlight scala %}
+// enable recursive enumeration of nested input files
+val env  = ExecutionEnvironment.getExecutionEnvironment
+
+// create a configuration object
+val parameters = new Configuration
+
+// set the recursive enumeration parameter
+parameters.setBoolean("recursive.file.enumeration", true)
+
+// pass the configuration to the data source
+env.readTextFile("file:///path/with.nested/files").withParameters(parameters)
+{% endhighlight %}
+
+</div>
+</div>
 [Back to top](#top)
 
 Data Sinks
@@ -2015,7 +2071,7 @@ env.execute("Iterative Pi Example");
 {% endhighlight %}
 
 You can also check out the
-{% gh_link /flink-examples/flink-java-examples/src/main/java/org/apache/flink/example/java/clustering/KMeans.java "K-Means example" %},
+{% gh_link /flink-examples/flink-java-examples/src/main/java/org/apache/flink/examples/java/clustering/KMeans.java "K-Means example" %},
 which uses a BulkIteration to cluster a set of unlabeled points.
 
 #### Delta Iterations
@@ -2272,7 +2328,7 @@ data.map(new MapFunction<String, String>() {
 
 Make sure that the names (`broadcastSetName` in the previous example) match when registering and
 accessing broadcasted data sets. For a complete example program, have a look at
-{% gh_link /flink-examples/flink-java-examples/src/main/java/org/apache/flink/example/java/clustering/KMeans.java#L96 "KMeans Algorithm" %}.
+{% gh_link /flink-examples/flink-java-examples/src/main/java/org/apache/flink/examples/java/clustering/KMeans.java#L96 "K-Means Algorithm" %}.
 </div>
 <div data-lang="scala" markdown="1">
 
@@ -2312,7 +2368,7 @@ of a function, or use the `withParameters(...)` method to pass in a configuratio
 Program Packaging & Distributed Execution
 -----------------------------------------
 
-As described in the [program skeleton](#skeleton) section, Flink programs can be executed on
+As described in the [program skeleton](#program-skeleton) section, Flink programs can be executed on
 clusters by using the `RemoteEnvironment`. Alternatively, programs can be packaged into JAR Files
 (Java Archives) for execution. Packaging the program is a prerequisite to executing them through the
 [command line interface](cli.html) or the [web interface](web_client.html).
@@ -2429,7 +2485,7 @@ name.
 A note on accumulators and iterations: Currently the result of accumulators is only available after
 the overall job ended. We plan to also make the result of the previous iteration available in the
 next iteration. You can use
-{% gh_link /flink-java/src/main/java/org/apache/flink/api/java/IterativeDataSet.java#L98 "Aggregators" %}
+{% gh_link /flink-java/src/main/java/org/apache/flink/api/java/operators/IterativeDataSet.java#L98 "Aggregators" %}
 to compute per-iteration statistics and base the termination of iterations on such statistics.
 
 __Custom accumulators:__
@@ -2463,7 +2519,7 @@ The degree of parallelism of a task can be specified in Flink on different level
 
 The parallelism of an individual operator, data source, or data sink can be defined by calling its
 `setParallelism()` method.  For example, the degree of parallelism of the `Sum` operator in the
-[WordCount](#example) example program can be set to `5` as follows :
+[WordCount](#example-program) example program can be set to `5` as follows :
 
 
 <div class="codetabs" markdown="1">
@@ -2506,7 +2562,7 @@ parallelism of an operator.
 
 The default parallelism of an execution environment can be specified by calling the
 `setDegreeOfParallelism()` method. To execute all operators, data sources, and data sinks of the
-[WordCount](#example) example program with a parallelism of `3`, set the default parallelism of the
+[WordCount](#example-program) example program with a parallelism of `3`, set the default parallelism of the
 execution environment as follows:
 
 <div class="codetabs" markdown="1">
@@ -2543,7 +2599,7 @@ env.execute("Word Count Example")
 
 A system-wide default parallelism for all execution environments can be defined by setting the
 `parallelization.degree.default` property in `./conf/flink-conf.yaml`. See the
-[Configuration]({{site.baseurl}}/config.html) documentation for details.
+[Configuration](config.html) documentation for details.
 
 [Back to top](#top)
 

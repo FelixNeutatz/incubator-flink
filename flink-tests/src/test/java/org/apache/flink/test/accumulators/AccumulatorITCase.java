@@ -19,6 +19,8 @@
 package org.apache.flink.test.accumulators;
 
 import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.util.Map;
 import java.util.Set;
 
@@ -35,8 +37,8 @@ import org.apache.flink.api.java.ExecutionEnvironment;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.io.IOReadableWritable;
-import org.apache.flink.core.memory.DataInputView;
-import org.apache.flink.core.memory.DataOutputView;
+import org.apache.flink.core.memory.InputViewObjectInputStreamWrapper;
+import org.apache.flink.core.memory.OutputViewObjectOutputStreamWrapper;
 import org.apache.flink.runtime.util.SerializableHashSet;
 import org.apache.flink.test.util.JavaProgramTestBase;
 import org.apache.flink.types.StringValue;
@@ -79,9 +81,9 @@ public class AccumulatorITCase extends JavaProgramTestBase {
 		JobExecutionResult res = this.result;
 		System.out.println(AccumulatorHelper.getResultsFormated(res.getAllAccumulatorResults()));
 		
-		Assert.assertEquals(new Integer(3), (Integer) res.getAccumulatorResult("num-lines"));
+		Assert.assertEquals(Integer.valueOf(3), (Integer) res.getAccumulatorResult("num-lines"));
 
-		Assert.assertEquals(new Double(getDegreeOfParallelism()), (Double)res.getAccumulatorResult("open-close-counter"));
+		Assert.assertEquals(Double.valueOf(getDegreeOfParallelism()), (Double)res.getAccumulatorResult("open-close-counter"));
 		
 		// Test histogram (words per line distribution)
 		Map<Integer, Integer> dist = Maps.newHashMap();
@@ -220,7 +222,7 @@ public class AccumulatorITCase extends JavaProgramTestBase {
 	/**
 	 * Custom accumulator
 	 */
-	public static class SetAccumulator<T extends IOReadableWritable> implements Accumulator<T, Set<T>> {
+	public static class SetAccumulator<T extends IOReadableWritable> implements Accumulator<T, SerializableHashSet<T>> {
 
 		private static final long serialVersionUID = 1L;
 
@@ -232,7 +234,7 @@ public class AccumulatorITCase extends JavaProgramTestBase {
 		}
 
 		@Override
-		public Set<T> getLocalValue() {
+		public SerializableHashSet<T> getLocalValue() {
 			return this.set;
 		}
 
@@ -242,19 +244,28 @@ public class AccumulatorITCase extends JavaProgramTestBase {
 		}
 
 		@Override
-		public void merge(Accumulator<T, Set<T>> other) {
+		public void merge(Accumulator<T, SerializableHashSet<T>> other) {
 			// build union
 			this.set.addAll(((SetAccumulator<T>) other).getLocalValue());
 		}
 
 		@Override
-		public void write(DataOutputView out) throws IOException {
-			this.set.write(out);
+		public void write(ObjectOutputStream out) throws IOException {
+			this.set.write(new OutputViewObjectOutputStreamWrapper(out));
 		}
 
 		@Override
-		public void read(DataInputView in) throws IOException {
-			this.set.read(in);
+		public void read(ObjectInputStream in) throws IOException {
+			this.set.read(new InputViewObjectInputStreamWrapper(in));
+		}
+
+		@Override
+		public Accumulator<T, SerializableHashSet<T>> clone() {
+			SetAccumulator<T> result = new SetAccumulator<T>();
+
+			result.set.addAll(set);
+
+			return result;
 		}
 	}
 }

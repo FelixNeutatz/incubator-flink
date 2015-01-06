@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.FutureTask;
 
+import akka.actor.ActorRef;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.core.io.IOReadableWritable;
@@ -33,6 +34,7 @@ import org.apache.flink.core.memory.MemorySegment;
 import org.apache.flink.runtime.broadcast.BroadcastVariableManager;
 import org.apache.flink.runtime.execution.Environment;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
+import org.apache.flink.runtime.io.disk.iomanager.IOManagerAsync;
 import org.apache.flink.runtime.io.network.Buffer;
 import org.apache.flink.runtime.io.network.bufferprovider.BufferAvailabilityListener;
 import org.apache.flink.runtime.io.network.bufferprovider.BufferProvider;
@@ -52,7 +54,7 @@ import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.jobgraph.tasks.InputSplitProvider;
 import org.apache.flink.runtime.memorymanager.DefaultMemoryManager;
 import org.apache.flink.runtime.memorymanager.MemoryManager;
-import org.apache.flink.runtime.protocols.AccumulatorProtocol;
+import org.apache.flink.runtime.plugable.DeserializationDelegate;
 import org.apache.flink.types.Record;
 import org.apache.flink.util.MutableObjectIterator;
 
@@ -68,7 +70,7 @@ public class MockEnvironment implements Environment, BufferProvider, LocalBuffer
 
 	private final Configuration taskConfiguration;
 
-	private final List<InputGate<Record>> inputs;
+	private final List<InputGate<DeserializationDelegate<Record>>> inputs;
 
 	private final List<OutputGate> outputs;
 
@@ -82,11 +84,11 @@ public class MockEnvironment implements Environment, BufferProvider, LocalBuffer
 	public MockEnvironment(long memorySize, MockInputSplitProvider inputSplitProvider, int bufferSize) {
 		this.jobConfiguration = new Configuration();
 		this.taskConfiguration = new Configuration();
-		this.inputs = new LinkedList<InputGate<Record>>();
+		this.inputs = new LinkedList<InputGate<DeserializationDelegate<Record>>>();
 		this.outputs = new LinkedList<OutputGate>();
 
 		this.memManager = new DefaultMemoryManager(memorySize, 1);
-		this.ioManager = new IOManager(System.getProperty("java.io.tmpdir"));
+		this.ioManager = new IOManagerAsync();
 		this.inputSplitProvider = inputSplitProvider;
 		this.mockBuffer = new Buffer(new MemorySegment(new byte[bufferSize]), bufferSize, null);
 	}
@@ -171,7 +173,7 @@ public class MockEnvironment implements Environment, BufferProvider, LocalBuffer
 
 	}
 
-	private static class MockInputGate extends InputGate<Record> {
+	private static class MockInputGate extends InputGate<DeserializationDelegate<Record>> {
 		
 		private MutableObjectIterator<Record> it;
 
@@ -181,15 +183,17 @@ public class MockEnvironment implements Environment, BufferProvider, LocalBuffer
 		}
 
 		@Override
-		public void registerRecordAvailabilityListener(final RecordAvailabilityListener<Record> listener) {
+		public void registerRecordAvailabilityListener(final RecordAvailabilityListener<DeserializationDelegate<Record>> listener) {
 			super.registerRecordAvailabilityListener(listener);
 			this.notifyRecordIsAvailable(0);
 		}
 		
 		@Override
-		public InputChannelResult readRecord(Record target) throws IOException, InterruptedException {
+		public InputChannelResult readRecord(DeserializationDelegate<Record> target) throws IOException, InterruptedException {
 
-			if ((target = it.next(target)) != null) {
+			Record reuse = target != null ? target.getInstance() : null;
+			
+			if ((reuse = it.next(reuse)) != null) {
 				// everything comes from the same source channel and buffer in this mock
 				notifyRecordIsAvailable(0);
 				return InputChannelResult.INTERMEDIATE_RECORD_FROM_BUFFER;
@@ -310,6 +314,11 @@ public class MockEnvironment implements Environment, BufferProvider, LocalBuffer
 	}
 
 	@Override
+	public ActorRef getAccumulator() {
+		throw new UnsupportedOperationException("Accumulators are not supported by the MockEnvironment.");
+	}
+
+	@Override
 	public OutputGate createAndRegisterOutputGate() {
 		return this.outputs.remove(0);
 	}
@@ -328,12 +337,6 @@ public class MockEnvironment implements Environment, BufferProvider, LocalBuffer
 	@Override
 	public int getNumberOfInputChannels() {
 		return this.inputs.size();
-	}
-	
-	@Override
-	public AccumulatorProtocol getAccumulatorProtocolProxy() {
-		throw new UnsupportedOperationException(
-				"getAccumulatorProtocolProxy() is not supported by MockEnvironment");
 	}
 
 	@Override

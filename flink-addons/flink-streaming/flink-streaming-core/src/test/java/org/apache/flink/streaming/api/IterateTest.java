@@ -22,9 +22,9 @@ import static org.junit.Assert.assertTrue;
 import org.apache.flink.api.common.functions.RichFlatMapFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.IterativeDataStream;
-import org.apache.flink.streaming.api.environment.LocalStreamEnvironment;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.function.sink.SinkFunction;
+import org.apache.flink.streaming.util.TestStreamEnvironment;
 import org.apache.flink.util.Collector;
 import org.junit.Test;
 
@@ -73,20 +73,20 @@ public class IterateTest {
 
 	@Test
 	public void test() throws Exception {
-		LocalStreamEnvironment env = StreamExecutionEnvironment.createLocalEnvironment(1);
+		StreamExecutionEnvironment env = new TestStreamEnvironment(1, MEMORYSIZE);
 
 		env.setBufferTimeout(10);
 
 		DataStream<Boolean> source = env.fromElements(false, false, false);
 
-		IterativeDataStream<Boolean> iteration = source.iterate().setMaxWaitTime(3000);
+		IterativeDataStream<Boolean> iteration = source.iterate(3000);
 
 		DataStream<Boolean> increment = iteration.flatMap(new IterationHead()).flatMap(
 				new IterationTail());
 
 		iteration.closeWith(increment).addSink(new MySink());
 
-		env.executeTest(MEMORYSIZE);
+		env.execute();
 
 		assertTrue(iterated);
 

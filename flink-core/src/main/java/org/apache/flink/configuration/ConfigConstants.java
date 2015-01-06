@@ -65,6 +65,11 @@ public final class ConfigConstants {
 	 * for communication with the job manager.
 	 */
 	public static final String JOB_MANAGER_IPC_PORT_KEY = "jobmanager.rpc.port";
+
+	/**
+	 * The config parameter defining the akka url of the job manager
+	 */
+	public static final String JOB_MANAGER_AKKA_URL = "jobmanager.akka.url";
 	
 	/**
 	 * The config parameter defining the number of handler threads for the jobmanager RPC service.
@@ -75,7 +80,7 @@ public final class ConfigConstants {
 	 * The config parameter defining the number of seconds that a task manager heartbeat may be missing before it is
 	 * marked as failed.
 	 */
-	public static final String JOB_MANAGER_DEAD_TASKMANAGER_TIMEOUT_KEY = "jobmanager.max-heartbeat-delay-before-failure.sec";
+	public static final String JOB_MANAGER_DEAD_TASKMANAGER_TIMEOUT_KEY = "jobmanager.max-heartbeat-delay-before-failure.msecs";
 	
 	/**
 	 * The config parameter defining the task manager's IPC port from the configuration.
@@ -245,11 +250,6 @@ public final class ConfigConstants {
 	public static final String JOB_MANAGER_WEB_PORT_KEY = "jobmanager.web.port";
 
 	/**
-	 * The parameter defining the directory containing the web documents for the jobmanager web frontend.
-	 */
-	public static final String JOB_MANAGER_WEB_ROOT_PATH_KEY = "jobmanager.web.rootpath";
-
-	/**
 	 * The config parameter defining the path to the htaccess file protecting the web frontend.
 	 */
 	public static final String JOB_MANAGER_WEB_ACCESS_FILE_KEY = "jobmanager.web.access";
@@ -268,11 +268,6 @@ public final class ConfigConstants {
 	 * The config parameter defining port for the pact web-frontend server.
 	 */
 	public static final String WEB_FRONTEND_PORT_KEY = "webclient.port";
-
-	/**
-	 * The config parameter defining the directory containing the web documents.
-	 */
-	public static final String WEB_ROOT_PATH_KEY = "webclient.rootpath";
 
 	/**
 	 * The config parameter defining the temporary data directory for the web client.
@@ -294,9 +289,70 @@ public final class ConfigConstants {
 	 */
 	public static final String WEB_ACCESS_FILE_KEY = "webclient.access";
 	
-	// ----------------------------- YARN Client ----------------------------
-	
-	public static final String YARN_AM_PRC_PORT = "yarn.am.rpc.port";
+
+	// ------------------------------ AKKA ------------------------------------
+
+	public static final String AKKA_STARTUP_TIMEOUT = "akka.startup-timeout";
+
+	/**
+	 * Heartbeat interval of the transport failure detector
+	 */
+	public static final String AKKA_TRANSPORT_HEARTBEAT_INTERVAL = "akka.transport.heartbeat.interval";
+
+	/**
+	 * Allowed heartbeat pause for the transport failure detector
+	 */
+	public static final String AKKA_TRANSPORT_HEARTBEAT_PAUSE = "akka.transport.heartbeat.pause";
+
+	/**
+	 * Detection threshold of transport failure detector
+	 */
+	public static final String AKKA_TRANSPORT_THRESHOLD = "akka.transport.threshold";
+
+	/**
+	 * Heartbeat interval of watch failure detector
+	 */
+	public static final String AKKA_WATCH_HEARTBEAT_INTERVAL = "akka.watch.heartbeat.interval";
+
+	/**
+	 * Allowed heartbeat pause for the watch failure detector
+	 */
+	public static final String AKKA_WATCH_HEARTBEAT_PAUSE = "akka.watch.heartbeat.pause";
+
+	/**
+	 * Detection threshold for the phi accrual watch failure detector
+	 */
+	public static final String AKKA_WATCH_THRESHOLD = "akka.watch.threshold";
+
+	/**
+	 * Akka TCP timeout
+	 */
+	public static final String AKKA_TCP_TIMEOUT = "akka.tcp.timeout";
+
+	/**
+	 * Maximum framesize of akka messages
+	 */
+	public static final String AKKA_FRAMESIZE = "akka.framesize";
+
+	/**
+	 * Maximum number of messages until another actor is executed by the same thread
+	 */
+	public static final String AKKA_DISPATCHER_THROUGHPUT = "akka.throughput";
+
+	/**
+	 * Log lifecycle events
+	 */
+	public static final String AKKA_LOG_LIFECYCLE_EVENTS = "akka.log.lifecycle.events";
+
+	/**
+	 * Log level for akka
+	 */
+	public static final String AKKA_LOG_LEVEL = "akka.loglevel";
+
+	/**
+	 * Timeout for all blocking calls
+	 */
+	public static final String AKKA_ASK_TIMEOUT = "akka.ask.timeout";
 	
 	// ----------------------------- Miscellaneous ----------------------------
 	
@@ -347,16 +403,16 @@ public final class ConfigConstants {
 	public static final int DEFAULT_JOB_MANAGER_DEAD_TASKMANAGER_TIMEOUT = 30*1000;
 	
 	/**
-	 * The default network port the task manager expects incoming IPC connections. The {@code -1} means that
+	 * The default network port the task manager expects incoming IPC connections. The {@code 0} means that
 	 * the TaskManager searches for a free port.
 	 */
-	public static final int DEFAULT_TASK_MANAGER_IPC_PORT = -1;
+	public static final int DEFAULT_TASK_MANAGER_IPC_PORT = 0;
 
 	/**
-	 * The default network port the task manager expects to receive transfer envelopes on. The {@code -1} means that
+	 * The default network port the task manager expects to receive transfer envelopes on. The {@code 0} means that
 	 * the TaskManager searches for a free port.
 	 */
-	public static final int DEFAULT_TASK_MANAGER_DATA_PORT = -1;
+	public static final int DEFAULT_TASK_MANAGER_DATA_PORT = 0;
 
 	/**
 	 * The default directory for temporary files of the task manager.
@@ -410,11 +466,6 @@ public final class ConfigConstants {
 	public static final int DEFAULT_TASK_MANAGER_NET_NETTY_HIGH_WATER_MARK = -1;
 
 	/**
-	 * The default interval for TaskManager heart beats (5000 msecs).
-	 */
-	public static final int DEFAULT_TASK_MANAGER_HEARTBEAT_INTERVAL = 5000;
-
-	/**
 	 * Flag indicating whether to start a thread, which repeatedly logs the memory usage of the JVM.
 	 */
 	public static final boolean DEFAULT_TASK_MANAGER_DEBUG_MEMORY_USAGE_START_LOG_THREAD = false;
@@ -422,7 +473,12 @@ public final class ConfigConstants {
 	/**
 	 * The interval (in ms) for the log thread to log the current memory usage.
 	 */
-	public static final int DEFAULT_TASK_MANAGER_DEBUG_MEMORY_USAGE_LOG_INTERVAL_MS = 5000;
+	public static final long DEFAULT_TASK_MANAGER_DEBUG_MEMORY_USAGE_LOG_INTERVAL_MS = 5000L;
+
+	/**
+	 * The default number of task slots per task manager
+	 */
+	public static final int DEFAULT_TASK_MANAGER_NUM_TASK_SLOTS = -1;
 	
 	/**
 	 * The default value for the JobClient's polling interval. 2 Seconds.
@@ -483,16 +539,6 @@ public final class ConfigConstants {
 	public static final int DEFAULT_JOB_MANAGER_WEB_FRONTEND_PORT = 8081;
 
 	/**
-	 * The default directory name of the info server
-	 */
-	public static final String DEFAULT_JOB_MANAGER_WEB_PATH_NAME = "web-docs-infoserver";
-	
-	/**
-	 * The default path of the directory for info server containing the web documents.
-	 */
-	public static final String DEFAULT_JOB_MANAGER_WEB_ROOT_PATH = "./resources/"+DEFAULT_JOB_MANAGER_WEB_PATH_NAME+"/";
-	
-	/**
 	 * The default number of archived jobs for the jobmanager
 	 */
 	public static final int DEFAULT_JOB_MANAGER_WEB_ARCHIVE_COUNT = 5;
@@ -506,15 +552,10 @@ public final class ConfigConstants {
 	public static final int DEFAULT_WEBCLIENT_PORT = 8080;
 
 	/**
-	 * The default path of the directory containing the web documents.
-	 */
-	public static final String DEFAULT_WEB_ROOT_DIR = "./resources/web-docs/";
-
-	/**
 	 * The default directory to store temporary objects (e.g. during file uploads).
 	 */
-	public static final String DEFAULT_WEB_TMP_DIR = System.getProperty("java.io.tmpdir") == null ? "/tmp" : System
-		.getProperty("java.io.tmpdir");
+	public static final String DEFAULT_WEB_TMP_DIR = 
+			System.getProperty("java.io.tmpdir") == null ? "/tmp" : System.getProperty("java.io.tmpdir");
 
 	/**
 	 * The default directory for temporary plan dumps from the web frontend.
@@ -532,9 +573,33 @@ public final class ConfigConstants {
 	 */
 	public static final String DEFAULT_WEB_ACCESS_FILE_PATH = null;
 	
-	// ----------------------------- YARN ----------------------------
-	
-	public static final int DEFAULT_YARN_AM_RPC_PORT = 10245;
+	// ------------------------------ Akka Values ------------------------------
+
+	public static String DEFAULT_AKKA_STARTUP_TIMEOUT = "60 s";
+
+	public static String DEFAULT_AKKA_TRANSPORT_HEARTBEAT_INTERVAL = "1000 s";
+
+	public static String DEFAULT_AKKA_TRANSPORT_HEARTBEAT_PAUSE = "6000 s";
+
+	public static double DEFAULT_AKKA_TRANSPORT_THRESHOLD = 300.0;
+
+	public static String DEFAULT_AKKA_WATCH_HEARTBEAT_INTERVAL = "5000 ms";
+
+	public static String DEFAULT_AKKA_WATCH_HEARTBEAT_PAUSE = "1 m";
+
+	public static double DEFAULT_AKKA_WATCH_THRESHOLD = 12;
+
+	public static String DEFAULT_AKKA_TCP_TIMEOUT = "100 s";
+
+	public static int DEFAULT_AKKA_DISPATCHER_THROUGHPUT = 15;
+
+	public static boolean DEFAULT_AKKA_LOG_LIFECYCLE_EVENTS = false;
+
+	public static String DEFAULT_AKKA_FRAMESIZE = "10485760b";
+
+	public static String DEFAULT_AKKA_LOG_LEVEL = "ERROR";
+
+	public static int DEFAULT_AKKA_ASK_TIMEOUT = 100;
 	
 
 	// ----------------------------- LocalExecution ----------------------------
@@ -544,19 +609,6 @@ public final class ConfigConstants {
 	 */
 	public static final String LOCAL_INSTANCE_MANAGER_NUMBER_TASK_MANAGER = "localinstancemanager.numtaskmanager";
 	
-	
-	// ----------------------------- Deprecated --------------------------------
-
-	/**
-	 * The default definition for an instance type, if no other configuration is provided.
-	 */
-	public static final String DEFAULT_INSTANCE_TYPE = "default,1,1,1,1,0"; // minimalistic instance type until "cloud" model is fully removed.
-
-	/**
-	 * The default index for the default instance type.
-	 */
-	public static final int DEFAULT_DEFAULT_INSTANCE_TYPE_INDEX = 1;
-
 	// ------------------------------------------------------------------------
 	
 	/**

@@ -18,8 +18,7 @@
 
 package org.apache.flink.runtime.instance;
 
-import java.io.IOException;
-import java.net.InetSocketAddress;
+import java.io.Serializable;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -27,49 +26,47 @@ import java.util.List;
 import java.util.Queue;
 import java.util.Set;
 
-import org.apache.flink.runtime.ipc.RPC;
+import akka.actor.ActorRef;
 import org.apache.flink.runtime.jobgraph.JobID;
-import org.apache.flink.runtime.jobmanager.scheduler.SlotAvailablilityListener;
-import org.apache.flink.runtime.net.NetUtils;
-import org.apache.flink.runtime.protocols.TaskOperationProtocol;
-import org.eclipse.jetty.util.log.Log;
+import org.apache.flink.runtime.jobmanager.scheduler.SlotAvailabilityListener;
 
 /**
- * An instance represents a resource a {@link org.apache.flink.runtime.taskmanager.TaskManager} runs on.
+ * An taskManager represents a resource a {@link org.apache.flink.runtime.taskmanager.TaskManager} runs on.
  */
-public class Instance {
+public class Instance implements Serializable {
+
+	static final long serialVersionUID = 42L;
 	
 	/** The lock on which to synchronize allocations and failure state changes */
-	private final Object instanceLock = new Object();
+	private transient final Object instanceLock = new Object();
 	
-	/** The connection info to connect to the task manager represented by this instance. */
-	private final InstanceConnectionInfo instanceConnectionInfo;
+	/** The actor ref to the task manager represented by this taskManager. */
+	private transient final ActorRef taskManager;
+
+	/** The instance connection information for the data transfer. */
+	private final InstanceConnectionInfo connectionInfo;
 	
 	/** A description of the resources of the task manager */
 	private final HardwareDescription resources;
 	
-	/** The ID identifying the instance. */
+	/** The ID identifying the taskManager. */
 	private final InstanceID instanceId;
 
 	/** The number of task slots available on the node */
 	private final int numberOfSlots;
 
-	/** A list of available slot positons */
-	private final Queue<Integer> availableSlots;
+	/** A list of available slot positions */
+	private transient final Queue<Integer> availableSlots;
 	
-	/** Allocated slots on this instance */
+	/** Allocated slots on this taskManager */
 	private final Set<AllocatedSlot> allocatedSlots = new HashSet<AllocatedSlot>();
 
 	
 	/** A listener to be notified upon new slot availability */
-	private SlotAvailablilityListener slotListener;
+	private transient SlotAvailabilityListener slotAvailabilityListener;
 	
-	
-	/** The RPC proxy to send calls to the task manager represented by this instance */
-	private volatile TaskOperationProtocol taskManager;
-
 	/**
-	 * Time when last heat beat has been received from the task manager running on this instance.
+	 * Time when last heat beat has been received from the task manager running on this taskManager.
 	 */
 	private volatile long lastReceivedHeartBeat = System.currentTimeMillis();
 	
@@ -78,15 +75,17 @@ public class Instance {
 	// --------------------------------------------------------------------------------------------
 	
 	/**
-	 * Constructs an abstract instance object.
+	 * Constructs an abstract taskManager object.
 	 * 
-	 * @param instanceConnectionInfo The connection info under which to reach the TaskManager instance.
-	 * @param id The id under which the instance is registered.
+	 * @param taskManager The actor reference of the represented task manager.
+	 * @param id The id under which the taskManager is registered.
 	 * @param resources The resources available on the machine.
-	 * @param numberOfSlots The number of task slots offered by this instance.
+	 * @param numberOfSlots The number of task slots offered by this taskManager.
 	 */
-	public Instance(InstanceConnectionInfo instanceConnectionInfo, InstanceID id, HardwareDescription resources, int numberOfSlots) {
-		this.instanceConnectionInfo = instanceConnectionInfo;
+	public Instance(ActorRef taskManager, InstanceConnectionInfo connectionInfo, InstanceID id,
+					HardwareDescription resources, int numberOfSlots) {
+		this.taskManager = taskManager;
+		this.connectionInfo = connectionInfo;
 		this.instanceId = id;
 		this.resources = resources;
 		this.numberOfSlots = numberOfSlots;
@@ -113,15 +112,6 @@ public class Instance {
 		return numberOfSlots;
 	}
 	
-	/**
-	 * Returns the instance's connection information object.
-	 * 
-	 * @return the instance's connection information object
-	 */
-	public InstanceConnectionInfo getInstanceConnectionInfo() {
-		return this.instanceConnectionInfo;
-	}
-	
 	// --------------------------------------------------------------------------------------------
 	// Life and Death
 	// --------------------------------------------------------------------------------------------
@@ -129,7 +119,7 @@ public class Instance {
 	public boolean isAlive() {
 		return !isDead;
 	}
-	
+
 	public void markDead() {
 		if (isDead) {
 			return;
@@ -140,7 +130,7 @@ public class Instance {
 		synchronized (instanceLock) {
 			
 			// no more notifications for the slot releasing
-			this.slotListener = null;
+			this.slotAvailabilityListener = null;
 			
 			for (AllocatedSlot slot : allocatedSlots) {
 				slot.releaseSlot();
@@ -148,48 +138,7 @@ public class Instance {
 			allocatedSlots.clear();
 			availableSlots.clear();
 		}
-		
-		destroyTaskManagerProxy();
 	}
-	
-	// --------------------------------------------------------------------------------------------
-	//  Connection to the TaskManager
-	// --------------------------------------------------------------------------------------------
-	
-	public TaskOperationProtocol getTaskManagerProxy() throws IOException {
-		if (isDead) {
-			throw new IOException("Instance has died");
-		}
-		
-		TaskOperationProtocol tm = this.taskManager;
-		
-		if (tm == null) {
-			synchronized (this) {
-				if (this.taskManager == null) {
-					this.taskManager = RPC.getProxy(TaskOperationProtocol.class,
-						new InetSocketAddress(getInstanceConnectionInfo().address(),
-							getInstanceConnectionInfo().ipcPort()), NetUtils.getSocketFactory());
-				}
-				tm = this.taskManager;
-			}
-		}
-		
-		return tm;
-	}
-
-	/**  Destroys and removes the RPC stub object for this instance's task manager. */
-	private void destroyTaskManagerProxy() {
-		synchronized (this) {
-			if (this.taskManager != null) {
-				try {
-					RPC.stopProxy(this.taskManager);
-				} catch (Throwable t) {
-					Log.debug("Error shutting down RPC proxy.", t);
-				}
-			}
-		}
-	}
-	
 
 
 	// --------------------------------------------------------------------------------------------
@@ -218,7 +167,7 @@ public class Instance {
 	 *  
 	 * @param now The timestamp representing the current time.
 	 * @param cleanUpInterval The maximum time (in msecs) that the last heartbeat may lie in the past.
-	 * @return True, if this instance is considered alive, false otherwise.
+	 * @return True, if this taskManager is considered alive, false otherwise.
 	 */
 	public boolean isStillAlive(long now, long cleanUpInterval) {
 		return this.lastReceivedHeartBeat + cleanUpInterval > now;
@@ -250,9 +199,9 @@ public class Instance {
 	}
 	
 	public boolean returnAllocatedSlot(AllocatedSlot slot) {
-		// the slot needs to be in the returned to instance state
+		// the slot needs to be in the returned to taskManager state
 		if (slot == null || slot.getInstance() != this) {
-			throw new IllegalArgumentException("Slot is null or belongs to the wrong instance.");
+			throw new IllegalArgumentException("Slot is null or belongs to the wrong taskManager.");
 		}
 		if (slot.isAlive()) {
 			throw new IllegalArgumentException("Slot is still alive");
@@ -267,13 +216,13 @@ public class Instance {
 				if (this.allocatedSlots.remove(slot)) {
 					this.availableSlots.add(slot.getSlotNumber());
 					
-					if (this.slotListener != null) {
-						this.slotListener.newSlotAvailable(this);
+					if (this.slotAvailabilityListener != null) {
+						this.slotAvailabilityListener.newSlotAvailable(this);
 					}
 					
 					return true;
 				} else {
-					throw new IllegalArgumentException("Slot was not allocated from the instance.");
+					throw new IllegalArgumentException("Slot was not allocated from the taskManager.");
 				}
 			}
 		} else {
@@ -292,6 +241,18 @@ public class Instance {
 			allocatedSlots.clear();
 		}
 	}
+
+	public ActorRef getTaskManager() {
+		return taskManager;
+	}
+
+	public String getPath(){
+		return taskManager.path().toString();
+	}
+
+	public InstanceConnectionInfo getInstanceConnectionInfo() {
+		return connectionInfo;
+	}
 	
 	public int getNumberOfAvailableSlots() {
 		return this.availableSlots.size();
@@ -309,19 +270,19 @@ public class Instance {
 	// Listeners
 	// --------------------------------------------------------------------------------------------
 	
-	public void setSlotAvailabilityListener(SlotAvailablilityListener slotListener) {
+	public void setSlotAvailabilityListener(SlotAvailabilityListener slotAvailabilityListener) {
 		synchronized (instanceLock) {
-			if (this.slotListener != null) {
+			if (this.slotAvailabilityListener != null) {
 				throw new IllegalStateException("Instance has already a slot listener.");
 			} else {
-				this.slotListener = slotListener;
+				this.slotAvailabilityListener = slotAvailabilityListener;
 			}
 		}
 	}
 	
 	public void removeSlotListener() {
 		synchronized (instanceLock) {
-			this.slotListener = null;
+			this.slotAvailabilityListener = null;
 		}
 	}
 	
@@ -331,6 +292,7 @@ public class Instance {
 	
 	@Override
 	public String toString() {
-		return instanceId + " @" + this.instanceConnectionInfo + ' ' + numberOfSlots + " slots";
+		return instanceId + " @" + (taskManager != null ? taskManager.path() : "ActorRef.noSender") + " " +
+				numberOfSlots + " slots";
 	}
 }

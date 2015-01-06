@@ -22,13 +22,15 @@ package org.apache.flink.runtime.jobmanager.web;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.net.URL;
 
+import akka.actor.ActorRef;
+import org.eclipse.jetty.server.handler.ResourceHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.GlobalConfiguration;
-import org.apache.flink.runtime.jobmanager.JobManager;
 import org.eclipse.jetty.http.security.Constraint;
 import org.eclipse.jetty.security.ConstraintMapping;
 import org.eclipse.jetty.security.ConstraintSecurityHandler;
@@ -36,9 +38,9 @@ import org.eclipse.jetty.security.HashLoginService;
 import org.eclipse.jetty.security.authentication.BasicAuthenticator;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.handler.HandlerList;
-import org.eclipse.jetty.server.handler.ResourceHandler;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
+import scala.concurrent.duration.FiniteDuration;
 
 
 /**
@@ -46,6 +48,11 @@ import org.eclipse.jetty.servlet.ServletHolder;
  * It instantiates and configures an embedded jetty server.
  */
 public class WebInfoServer {
+
+	/**
+	 * Web root dir in the jar
+	 */
+	private static final String WEB_ROOT_DIR = "web-docs-infoserver";
 
 	/**
 	 * The log for this class.
@@ -58,6 +65,11 @@ public class WebInfoServer {
 	private final Server server;
 
 	/**
+	 * Timeout for akka requests
+	 */
+	private final FiniteDuration timeout;
+
+	/**
 	 * Port for info server
 	 */
 	private int port;
@@ -66,26 +78,35 @@ public class WebInfoServer {
 	 * Creates a new web info server. The server runs the servlets that implement the logic
 	 * to list all present information concerning the job manager
 	 *
-	 * @param nepheleConfig
-	 *        The configuration for the nephele job manager.
-	 * @param port
-	 *        The port to launch the server on.
+	 * @param config
+	 *        The configuration for the flink job manager.
 	 * @throws IOException
 	 *         Thrown, if the server setup failed for an I/O related reason.
 	 */
-	public WebInfoServer(Configuration nepheleConfig, int port, JobManager jobmanager) throws IOException {
-		this.port = port;
-
+	public WebInfoServer(Configuration config, ActorRef jobmanager,
+						ActorRef archive, FiniteDuration timeout) throws IOException {
+		
 		// if no explicit configuration is given, use the global configuration
-		if (nepheleConfig == null) {
-			nepheleConfig = GlobalConfiguration.getConfiguration();
+		if (config == null) {
+			config = GlobalConfiguration.getConfiguration();
 		}
+		
+		this.port = config.getInteger(ConfigConstants.JOB_MANAGER_WEB_PORT_KEY,
+				ConfigConstants.DEFAULT_JOB_MANAGER_WEB_FRONTEND_PORT);
+		
+		this.timeout = timeout;
 
 		// get base path of Flink installation
-		final String basePath = nepheleConfig.getString(ConfigConstants.FLINK_BASE_DIR_PATH_KEY, "");
-		final String webDirPath = nepheleConfig.getString(ConfigConstants.JOB_MANAGER_WEB_ROOT_PATH_KEY, ConfigConstants.DEFAULT_JOB_MANAGER_WEB_ROOT_PATH);
-		final String[] logDirPaths = nepheleConfig.getString(ConfigConstants.JOB_MANAGER_WEB_LOG_PATH_KEY,
+		final String basePath = config.getString(ConfigConstants.FLINK_BASE_DIR_PATH_KEY, "");
+		final String[] logDirPaths = config.getString(ConfigConstants.JOB_MANAGER_WEB_LOG_PATH_KEY,
 				basePath+"/log").split(","); // YARN allows to specify multiple log directories
+
+		URL webRootDir = this.getClass().getClassLoader().getResource(WEB_ROOT_DIR);
+
+		if(webRootDir == null) {
+			throw new FileNotFoundException("Cannot start jobmanager web info server. The " +
+					"resource " + WEB_ROOT_DIR + " is not included in the jar.");
+		}
 
 		final File[] logDirFiles = new File[logDirPaths.length];
 		int i = 0;
@@ -93,30 +114,15 @@ public class WebInfoServer {
 			logDirFiles[i++] = new File(path);
 		}
 
-		File webDir;
-		if(webDirPath.startsWith("/")) {
-			// absolute path
-			webDir = new File(webDirPath);
-		} else {
-			// path relative to base dir
-			webDir = new File(basePath+"/"+webDirPath);
-		}
-
 
 		if (LOG.isInfoEnabled()) {
-			LOG.info("Setting up web info server, using web-root directory '" + webDir.getAbsolutePath() + "'.");
-			//LOG.info("Web info server will store temporary files in '" + tmpDir.getAbsolutePath());
+			LOG.info("Setting up web info server, using web-root directory" +
+					webRootDir.toExternalForm()	+ ".");
 
-			LOG.info("Web info server will display information about nephele job-manager on "
-				+ nepheleConfig.getString(ConfigConstants.JOB_MANAGER_IPC_ADDRESS_KEY, null) + ", port "
+			LOG.info("Web info server will display information about flink job-manager on "
+				+ config.getString(ConfigConstants.JOB_MANAGER_IPC_ADDRESS_KEY, null) + ", port "
 				+ port
 				+ ".");
-		}
-
-		// ensure that the directory with the web documents exists
-		if (!webDir.exists()) {
-			throw new FileNotFoundException("Cannot start jobmanager web info server. The directory containing the web documents does not exist: "
-				+ webDir.getAbsolutePath());
 		}
 
 		server = new Server(port);
@@ -124,16 +130,18 @@ public class WebInfoServer {
 		// ----- the handlers for the servlets -----
 		ServletContextHandler servletContext = new ServletContextHandler(ServletContextHandler.SESSIONS);
 		servletContext.setContextPath("/");
-		servletContext.addServlet(new ServletHolder(new JobmanagerInfoServlet(jobmanager)), "/jobsInfo");
+		servletContext.addServlet(new ServletHolder(new JobmanagerInfoServlet(jobmanager,
+				archive, timeout)), "/jobsInfo");
 		servletContext.addServlet(new ServletHolder(new LogfileInfoServlet(logDirFiles)), "/logInfo");
-		servletContext.addServlet(new ServletHolder(new SetupInfoServlet(jobmanager)), "/setupInfo");
+		servletContext.addServlet(new ServletHolder(new SetupInfoServlet(jobmanager, timeout)),
+				"/setupInfo");
 		servletContext.addServlet(new ServletHolder(new MenuServlet()), "/menu");
 
 
 		// ----- the handler serving all the static files -----
 		ResourceHandler resourceHandler = new ResourceHandler();
 		resourceHandler.setDirectoriesListed(false);
-		resourceHandler.setResourceBase(webDir.getAbsolutePath());
+		resourceHandler.setResourceBase(webRootDir.toExternalForm());
 
 		// ----- add the handlers to the list handler -----
 		HandlerList handlers = new HandlerList();
@@ -143,7 +151,7 @@ public class WebInfoServer {
 		// ----- create the login module with http authentication -----
 
 		File af = null;
-		String authFile = nepheleConfig.getString(ConfigConstants.JOB_MANAGER_WEB_ACCESS_FILE_KEY, null);
+		String authFile = config.getString(ConfigConstants.JOB_MANAGER_WEB_ACCESS_FILE_KEY, null);
 		if (authFile != null) {
 			af = new File(authFile);
 			if (!af.exists()) {

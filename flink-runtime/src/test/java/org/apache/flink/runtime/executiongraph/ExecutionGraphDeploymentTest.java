@@ -22,16 +22,19 @@ import static org.apache.flink.runtime.executiongraph.ExecutionGraphTestUtils.ge
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.fail;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.spy;
-import static org.mockito.Mockito.doAnswer;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicReference;
 
+import akka.actor.ActorRef;
+import akka.actor.ActorSystem;
+import akka.actor.Props;
+import akka.testkit.JavaTestKit;
+import akka.testkit.TestActorRef;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.deployment.TaskDeploymentDescriptor;
 import org.apache.flink.runtime.execution.ExecutionState;
@@ -43,20 +46,28 @@ import org.apache.flink.runtime.jobgraph.JobID;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.jobmanager.scheduler.Scheduler;
 import org.apache.flink.runtime.operators.RegularPactTask;
-import org.apache.flink.runtime.protocols.TaskOperationProtocol;
-import org.apache.flink.runtime.taskmanager.TaskOperationResult;
-
+import org.apache.flink.runtime.testingUtils.TestingUtils;
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 import org.junit.Test;
-
-import org.mockito.Matchers;
-import org.mockito.invocation.InvocationOnMock;
-import org.mockito.stubbing.Answer;
-
 public class ExecutionGraphDeploymentTest {
+	private static ActorSystem system;
+
+	@BeforeClass
+	public static void setup(){
+		system = ActorSystem.create("TestingActorSystem", TestingUtils.testConfig());
+	}
+
+	@AfterClass
+	public static void teardown(){
+		JavaTestKit.shutdownActorSystem(system);
+		system = null;
+	}
 	
 	@Test
 	public void testBuildDeploymentDescriptor() {
 		try {
+			TestingUtils.setCallingThreadDispatcher(system);
 			final JobID jobId = new JobID();
 			
 			final JobVertexID jid1 = new JobVertexID();
@@ -83,48 +94,34 @@ public class ExecutionGraphDeploymentTest {
 			v3.connectNewDataSetAsInput(v2, DistributionPattern.BIPARTITE);
 			v4.connectNewDataSetAsInput(v2, DistributionPattern.BIPARTITE);
 			
-			ExecutionGraph eg = spy(new ExecutionGraph(jobId, "some job", new Configuration()));
-			doAnswer(new Answer<Void>() {
-				@Override
-				public Void answer(InvocationOnMock invocation) {
-					final Runnable parameter = (Runnable) invocation.getArguments()[0];
-					parameter.run();
-					return null;
-				}
-				
-			}).when(eg).execute(Matchers.any(Runnable.class));
-			
+			ExecutionGraph eg = new ExecutionGraph(jobId, "some job", new Configuration());
+
 			List<AbstractJobVertex> ordered = Arrays.asList(v1, v2, v3, v4);
 			
 			eg.attachJobGraph(ordered);
 			
 			ExecutionJobVertex ejv = eg.getAllVertices().get(jid2);
 			ExecutionVertex vertex = ejv.getTaskVertices()[3];
-			
-			// just some reference (needs not be atomic)
-			final AtomicReference<TaskDeploymentDescriptor> reference = new AtomicReference<TaskDeploymentDescriptor>();
-			
-			// mock taskmanager to simply accept the call
-			TaskOperationProtocol taskManager = mock(TaskOperationProtocol.class);
-			when(taskManager.submitTask(Matchers.any(TaskDeploymentDescriptor.class))).thenAnswer(new Answer<TaskOperationResult>() {
-				@Override
-				public TaskOperationResult answer(InvocationOnMock invocation) {
-					final TaskDeploymentDescriptor tdd = (TaskDeploymentDescriptor) invocation.getArguments()[0];
-					reference.set(tdd);
-					return new TaskOperationResult(tdd.getExecutionId(), true);
-				}
-			});
-			
-			final Instance instance = getInstance(taskManager);
+
+			// create synchronous task manager
+			final TestActorRef<?> simpleTaskManager = TestActorRef.create(system,
+					Props.create(ExecutionGraphTestUtils
+					.SimpleAcknowledgingTaskManager.class));
+
+			ExecutionGraphTestUtils.SimpleAcknowledgingTaskManager tm = (ExecutionGraphTestUtils
+					.SimpleAcknowledgingTaskManager) simpleTaskManager.underlyingActor();
+
+			final Instance instance = getInstance(simpleTaskManager);
+
 			final AllocatedSlot slot = instance.allocateSlot(jobId);
 			
 			assertEquals(ExecutionState.CREATED, vertex.getExecutionState());
-			
+
 			vertex.deployToSlot(slot);
 			
 			assertEquals(ExecutionState.RUNNING, vertex.getExecutionState());
 			
-			TaskDeploymentDescriptor descr = reference.get();
+			TaskDeploymentDescriptor descr = tm.lastTDD;
 			assertNotNull(descr);
 			
 			assertEquals(jobId, descr.getJobID());
@@ -144,13 +141,22 @@ public class ExecutionGraphDeploymentTest {
 		catch (Exception e) {
 			e.printStackTrace();
 			fail(e.getMessage());
+		}finally{
+			TestingUtils.setGlobalExecutionContext();
 		}
 	}
 	
 	@Test
 	public void testRegistrationOfExecutionsFinishing() {
 		try {
-			Map<ExecutionAttemptID, Execution> executions = setupExecution(7650, 2350);
+			
+			final JobVertexID jid1 = new JobVertexID();
+			final JobVertexID jid2 = new JobVertexID();
+			
+			AbstractJobVertex v1 = new AbstractJobVertex("v1", jid1);
+			AbstractJobVertex v2 = new AbstractJobVertex("v2", jid2);
+			
+			Map<ExecutionAttemptID, Execution> executions = setupExecution(v1, 7650, v2, 2350);
 			
 			for (Execution e : executions.values()) {
 				e.markFinished();
@@ -167,7 +173,14 @@ public class ExecutionGraphDeploymentTest {
 	@Test
 	public void testRegistrationOfExecutionsFailing() {
 		try {
-			Map<ExecutionAttemptID, Execution> executions = setupExecution(7, 6);
+			
+			final JobVertexID jid1 = new JobVertexID();
+			final JobVertexID jid2 = new JobVertexID();
+			
+			AbstractJobVertex v1 = new AbstractJobVertex("v1", jid1);
+			AbstractJobVertex v2 = new AbstractJobVertex("v2", jid2);
+			
+			Map<ExecutionAttemptID, Execution> executions = setupExecution(v1, 7, v2, 6);
 			
 			for (Execution e : executions.values()) {
 				e.markFailed(null);
@@ -184,7 +197,14 @@ public class ExecutionGraphDeploymentTest {
 	@Test
 	public void testRegistrationOfExecutionsFailedExternally() {
 		try {
-			Map<ExecutionAttemptID, Execution> executions = setupExecution(7, 6);
+			
+			final JobVertexID jid1 = new JobVertexID();
+			final JobVertexID jid2 = new JobVertexID();
+			
+			AbstractJobVertex v1 = new AbstractJobVertex("v1", jid1);
+			AbstractJobVertex v2 = new AbstractJobVertex("v2", jid2);
+			
+			Map<ExecutionAttemptID, Execution> executions = setupExecution(v1, 7, v2, 6);
 			
 			for (Execution e : executions.values()) {
 				e.fail(null);
@@ -201,7 +221,14 @@ public class ExecutionGraphDeploymentTest {
 	@Test
 	public void testRegistrationOfExecutionsCanceled() {
 		try {
-			Map<ExecutionAttemptID, Execution> executions = setupExecution(19, 37);
+			
+			final JobVertexID jid1 = new JobVertexID();
+			final JobVertexID jid2 = new JobVertexID();
+			
+			AbstractJobVertex v1 = new AbstractJobVertex("v1", jid1);
+			AbstractJobVertex v2 = new AbstractJobVertex("v2", jid2);
+			
+			Map<ExecutionAttemptID, Execution> executions = setupExecution(v1, 19, v2, 37);
 			
 			for (Execution e : executions.values()) {
 				e.cancel();
@@ -216,14 +243,51 @@ public class ExecutionGraphDeploymentTest {
 		}
 	}
 	
-	private Map<ExecutionAttemptID, Execution> setupExecution(int dop1, int dop2) throws Exception {
+	@Test
+	public void testRegistrationOfExecutionsFailingFinalize() {
+		try {
+			
+			final JobVertexID jid1 = new JobVertexID();
+			final JobVertexID jid2 = new JobVertexID();
+			
+			AbstractJobVertex v1 = new FailingFinalizeJobVertex("v1", jid1);
+			AbstractJobVertex v2 = new AbstractJobVertex("v2", jid2);
+			
+			Map<ExecutionAttemptID, Execution> executions = setupExecution(v1, 6, v2, 4);
+			
+			List<Execution> execList = new ArrayList<Execution>();
+			execList.addAll(executions.values());
+			// sort executions by job vertex. Failing job vertex first
+			Collections.sort(execList, new Comparator<Execution>() {
+				@Override
+				public int compare(Execution o1, Execution o2) {
+					return o1.getVertex().getSimpleName().compareTo(o2.getVertex().getSimpleName());
+				}
+			});
+			
+			int cnt = 0;
+			for (Execution e : execList) {
+				cnt++;
+				e.markFinished();
+				if(cnt <= 6) {
+					// the last execution of the first job vertex triggers the failing finalize hook
+					assertEquals(ExecutionState.FINISHED, e.getState());
+				} else {
+					// all following executions should be canceled
+					assertEquals(ExecutionState.CANCELED, e.getState());
+				}
+			}
+			
+			assertEquals(0, executions.size());
+		}
+		catch (Exception e) {
+			e.printStackTrace();
+			fail(e.getMessage());
+		}
+	}
+	
+	private Map<ExecutionAttemptID, Execution> setupExecution(AbstractJobVertex v1, int dop1, AbstractJobVertex v2, int dop2) throws Exception {
 		final JobID jobId = new JobID();
-		
-		final JobVertexID jid1 = new JobVertexID();
-		final JobVertexID jid2 = new JobVertexID();
-		
-		AbstractJobVertex v1 = new AbstractJobVertex("v1", jid1);
-		AbstractJobVertex v2 = new AbstractJobVertex("v2", jid2);
 		
 		v1.setParallelism(dop1);
 		v2.setParallelism(dop2);
@@ -239,25 +303,11 @@ public class ExecutionGraphDeploymentTest {
 		eg.attachJobGraph(ordered);
 		
 		// create a mock taskmanager that accepts deployment calls
-		TaskOperationProtocol taskManager = mock(TaskOperationProtocol.class);
-		when(taskManager.submitTask(Matchers.any(TaskDeploymentDescriptor.class))).thenAnswer(new Answer<TaskOperationResult>() {
-			@Override
-			public TaskOperationResult answer(InvocationOnMock invocation) {
-				final TaskDeploymentDescriptor tdd = (TaskDeploymentDescriptor) invocation.getArguments()[0];
-				return new TaskOperationResult(tdd.getExecutionId(), true);
-			}
-		});
-		when(taskManager.cancelTask(Matchers.any(ExecutionAttemptID.class))).thenAnswer(new Answer<TaskOperationResult>() {
-			@Override
-			public TaskOperationResult answer(InvocationOnMock invocation) {
-				final ExecutionAttemptID id = (ExecutionAttemptID) invocation.getArguments()[0];
-				return new TaskOperationResult(id, true);
-			}
-		});
-		
+		ActorRef tm = system.actorOf(Props.create(ExecutionGraphTestUtils.SimpleAcknowledgingTaskManager.class));
+
 		Scheduler scheduler = new Scheduler();
 		for (int i = 0; i < dop1 + dop2; i++) {
-			scheduler.newInstanceAvailable(getInstance(taskManager));
+			scheduler.newInstanceAvailable(ExecutionGraphTestUtils.getInstance(tm));
 		}
 		assertEquals(dop1 + dop2, scheduler.getNumberOfAvailableSlots());
 		
@@ -268,5 +318,24 @@ public class ExecutionGraphDeploymentTest {
 		assertEquals(dop1 + dop2, executions.size());
 		
 		return executions;
+	}
+	
+	@SuppressWarnings("serial")
+	public static class FailingFinalizeJobVertex extends AbstractJobVertex {
+
+		public FailingFinalizeJobVertex(String name) {
+			super(name);
+		}
+		
+		public FailingFinalizeJobVertex(String name, JobVertexID id) {
+			super(name, id);
+		}
+		
+		@Override
+		public void finalizeOnMaster(ClassLoader cl) throws Exception {
+			throw new Exception();
+		}
+		
+		
 	}
 }

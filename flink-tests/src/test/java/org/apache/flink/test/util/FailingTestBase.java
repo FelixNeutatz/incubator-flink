@@ -18,9 +18,9 @@
 
 package org.apache.flink.test.util;
 
+import akka.actor.ActorRef;
 import org.junit.Assert;
 
-import org.apache.flink.client.minicluster.NepheleMiniCluster;
 import org.apache.flink.runtime.client.JobClient;
 import org.apache.flink.runtime.client.JobExecutionException;
 import org.apache.flink.runtime.jobgraph.JobGraph;
@@ -119,7 +119,7 @@ public abstract class FailingTestBase extends RecordAPITestBase {
 		// reference to the timeout thread
 		private final Thread timeoutThread;
 		// cluster to submit the job to.
-		private final NepheleMiniCluster executor;
+		private final ForkableFlinkMiniCluster executor;
 		// job graph of the failing job (submitted first)
 		private final JobGraph failingJob;
 		// job graph of the working job (submitted after return from failing job)
@@ -128,7 +128,8 @@ public abstract class FailingTestBase extends RecordAPITestBase {
 		private volatile Exception error;
 		
 
-		public SubmissionThread(Thread timeoutThread, NepheleMiniCluster executor, JobGraph failingJob, JobGraph job) {
+		public SubmissionThread(Thread timeoutThread, ForkableFlinkMiniCluster executor, JobGraph
+				failingJob,	JobGraph job) {
 			this.timeoutThread = timeoutThread;
 			this.executor = executor;
 			this.failingJob = failingJob;
@@ -141,11 +142,11 @@ public abstract class FailingTestBase extends RecordAPITestBase {
 		 */
 		@Override
 		public void run() {
+			ActorRef client = this.executor.getJobClient();
+
 			try {
 				// submit failing job
-				JobClient client = this.executor.getJobClient(this.failingJob);
-				client.setConsoleStreamForReporting(AbstractTestBase.getNullPrintStream());
-				client.submitJobAndWait();
+				JobClient.submitJobAndWait(this.failingJob, false, client, executor.timeout());
 				
 				this.error = new Exception("The job did not fail.");
 			} catch(JobExecutionException jee) {
@@ -157,9 +158,7 @@ public abstract class FailingTestBase extends RecordAPITestBase {
 			
 			try {
 				// submit working job
-				JobClient client = this.executor.getJobClient(this.job);
-				client.setConsoleStreamForReporting(AbstractTestBase.getNullPrintStream());
-				client.submitJobAndWait();
+				JobClient.submitJobAndWait(this.job, false, client, executor.timeout());
 			} catch (Exception e) {
 				this.error = e;
 			}

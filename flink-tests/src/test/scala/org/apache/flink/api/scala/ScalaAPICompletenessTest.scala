@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -65,8 +65,10 @@ class ScalaAPICompletenessTest {
       "org.apache.flink.api.java.DataSet.minBy",
       "org.apache.flink.api.java.DataSet.maxBy",
       "org.apache.flink.api.java.operators.UnsortedGrouping.minBy",
-      "org.apache.flink.api.java.operators.UnsortedGrouping.maxBy"
-      
+      "org.apache.flink.api.java.operators.UnsortedGrouping.maxBy",
+
+      // This method is actually just an internal helper
+      "org.apache.flink.api.java.DataSet.getCallLocationName"
     )
     val excludedPatterns = Seq(
       // We don't have project on tuples in the Scala API

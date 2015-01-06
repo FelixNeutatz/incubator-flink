@@ -17,15 +17,11 @@
 
 package org.apache.flink.streaming.api.datastream;
 
-import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.apache.commons.lang3.SerializationException;
-import org.apache.commons.lang3.SerializationUtils;
 import org.apache.flink.api.common.functions.FilterFunction;
 import org.apache.flink.api.common.functions.FlatMapFunction;
-import org.apache.flink.api.common.functions.Function;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.functions.ReduceFunction;
 import org.apache.flink.api.common.functions.RichFilterFunction;
@@ -35,23 +31,23 @@ import org.apache.flink.api.common.functions.RichReduceFunction;
 import org.apache.flink.api.common.typeinfo.BasicArrayTypeInfo;
 import org.apache.flink.api.common.typeinfo.PrimitiveArrayTypeInfo;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.java.ClosureCleaner;
 import org.apache.flink.api.java.functions.KeySelector;
+import org.apache.flink.api.java.operators.Keys;
 import org.apache.flink.api.java.tuple.Tuple;
-import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.typeutils.TupleTypeInfo;
+import org.apache.flink.api.java.typeutils.TypeExtractor;
 import org.apache.flink.streaming.api.JobGraphBuilder;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.function.aggregation.AggregationFunction;
-import org.apache.flink.streaming.api.function.aggregation.MaxAggregationFunction;
-import org.apache.flink.streaming.api.function.aggregation.MaxByAggregationFunction;
-import org.apache.flink.streaming.api.function.aggregation.MinAggregationFunction;
-import org.apache.flink.streaming.api.function.aggregation.MinByAggregationFunction;
-import org.apache.flink.streaming.api.function.aggregation.SumAggregationFunction;
+import org.apache.flink.streaming.api.function.aggregation.AggregationFunction.AggregationType;
+import org.apache.flink.streaming.api.function.aggregation.ComparableAggregator;
+import org.apache.flink.streaming.api.function.aggregation.SumAggregator;
 import org.apache.flink.streaming.api.function.sink.PrintSinkFunction;
 import org.apache.flink.streaming.api.function.sink.SinkFunction;
+import org.apache.flink.streaming.api.function.sink.WriteFormat;
 import org.apache.flink.streaming.api.function.sink.WriteFormatAsCsv;
 import org.apache.flink.streaming.api.function.sink.WriteFormatAsText;
-import org.apache.flink.streaming.api.function.sink.WriteSinkFunctionByBatches;
 import org.apache.flink.streaming.api.function.sink.WriteSinkFunctionByMillis;
 import org.apache.flink.streaming.api.invokable.SinkInvokable;
 import org.apache.flink.streaming.api.invokable.StreamInvokable;
@@ -60,18 +56,18 @@ import org.apache.flink.streaming.api.invokable.operator.FilterInvokable;
 import org.apache.flink.streaming.api.invokable.operator.FlatMapInvokable;
 import org.apache.flink.streaming.api.invokable.operator.MapInvokable;
 import org.apache.flink.streaming.api.invokable.operator.StreamReduceInvokable;
-import org.apache.flink.streaming.api.invokable.util.DefaultTimeStamp;
-import org.apache.flink.streaming.api.invokable.util.TimeStamp;
+import org.apache.flink.streaming.api.windowing.helper.Count;
+import org.apache.flink.streaming.api.windowing.helper.Delta;
+import org.apache.flink.streaming.api.windowing.helper.Time;
+import org.apache.flink.streaming.api.windowing.helper.WindowingHelper;
+import org.apache.flink.streaming.api.windowing.policy.EvictionPolicy;
+import org.apache.flink.streaming.api.windowing.policy.TriggerPolicy;
 import org.apache.flink.streaming.partitioner.BroadcastPartitioner;
 import org.apache.flink.streaming.partitioner.DistributePartitioner;
 import org.apache.flink.streaming.partitioner.FieldsPartitioner;
-import org.apache.flink.streaming.partitioner.ForwardPartitioner;
 import org.apache.flink.streaming.partitioner.ShufflePartitioner;
 import org.apache.flink.streaming.partitioner.StreamPartitioner;
-import org.apache.flink.streaming.util.keys.FieldsKeySelector;
-import org.apache.flink.streaming.util.serialization.FunctionTypeWrapper;
-import org.apache.flink.streaming.util.serialization.ObjectTypeWrapper;
-import org.apache.flink.streaming.util.serialization.TypeWrapper;
+import org.apache.flink.streaming.util.keys.KeySelectorUtil;
 
 /**
  * A DataStream represents a stream of elements of the same type. A DataStream
@@ -96,7 +92,8 @@ public class DataStream<OUT> {
 	protected List<String> userDefinedNames;
 	protected boolean selectAll;
 	protected StreamPartitioner<OUT> partitioner;
-	protected final TypeWrapper<OUT> outTypeWrapper;
+	@SuppressWarnings("rawtypes")
+	protected TypeInformation typeInfo;
 	protected List<DataStream<OUT>> mergedStreams;
 
 	protected final JobGraphBuilder jobGraphBuilder;
@@ -109,11 +106,11 @@ public class DataStream<OUT> {
 	 *            StreamExecutionEnvironment
 	 * @param operatorType
 	 *            The type of the operator in the component
-	 * @param outTypeWrapper
-	 *            Type of the output
+	 * @param typeInfo
+	 *            Type of the datastream
 	 */
 	public DataStream(StreamExecutionEnvironment environment, String operatorType,
-			TypeWrapper<OUT> outTypeWrapper) {
+			TypeInformation<OUT> typeInfo) {
 		if (environment == null) {
 			throw new NullPointerException("context is null");
 		}
@@ -125,8 +122,8 @@ public class DataStream<OUT> {
 		this.jobGraphBuilder = environment.getJobGraphBuilder();
 		this.userDefinedNames = new ArrayList<String>();
 		this.selectAll = false;
-		this.partitioner = new ForwardPartitioner<OUT>();
-		this.outTypeWrapper = outTypeWrapper;
+		this.partitioner = new DistributePartitioner<OUT>(true);
+		this.typeInfo = typeInfo;
 		this.mergedStreams = new ArrayList<DataStream<OUT>>();
 		this.mergedStreams.add(this);
 	}
@@ -145,7 +142,7 @@ public class DataStream<OUT> {
 		this.selectAll = dataStream.selectAll;
 		this.partitioner = dataStream.partitioner;
 		this.jobGraphBuilder = dataStream.jobGraphBuilder;
-		this.outTypeWrapper = dataStream.outTypeWrapper;
+		this.typeInfo = dataStream.typeInfo;
 		this.mergedStreams = new ArrayList<DataStream<OUT>>();
 		this.mergedStreams.add(this);
 		if (dataStream.mergedStreams.size() > 1) {
@@ -154,13 +151,6 @@ public class DataStream<OUT> {
 			}
 		}
 
-	}
-
-	/**
-	 * Partitioning strategy on the stream.
-	 */
-	public static enum ConnectionType {
-		SHUFFLE, BROADCAST, FIELD, FORWARD, DISTRIBUTE
 	}
 
 	/**
@@ -182,73 +172,32 @@ public class DataStream<OUT> {
 	}
 
 	/**
-	 * Gets the output type.
+	 * Gets the type of the stream.
 	 * 
-	 * @return The output type.
+	 * @return The type of the datastream.
 	 */
-	public TypeInformation<OUT> getOutputType() {
-		return this.outTypeWrapper.getTypeInfo();
+	@SuppressWarnings("unchecked")
+	public TypeInformation<OUT> getType() {
+		return this.typeInfo;
 	}
 
-	/**
-	 * Gets the class of the field at the given position
-	 * 
-	 * @param pos
-	 *            Position of the field
-	 * @return The class of the field
-	 */
-	@SuppressWarnings("rawtypes")
-	protected Class<?> getClassAtPos(int pos) {
-		Class<?> type;
-		TypeInformation<OUT> outTypeInfo = outTypeWrapper.getTypeInfo();
-		if (outTypeInfo.isTupleType()) {
-			type = ((TupleTypeInfo) outTypeInfo).getTypeAt(pos).getTypeClass();
-
-		} else if (outTypeInfo instanceof BasicArrayTypeInfo) {
-
-			type = ((BasicArrayTypeInfo) outTypeInfo).getComponentTypeClass();
-
-		} else if (outTypeInfo instanceof PrimitiveArrayTypeInfo) {
-			Class<?> clazz = outTypeInfo.getTypeClass();
-			if (clazz == boolean[].class) {
-				type = Boolean.class;
-			} else if (clazz == short[].class) {
-				type = Short.class;
-			} else if (clazz == int[].class) {
-				type = Integer.class;
-			} else if (clazz == long[].class) {
-				type = Long.class;
-			} else if (clazz == float[].class) {
-				type = Float.class;
-			} else if (clazz == double[].class) {
-				type = Double.class;
-			} else if (clazz == char[].class) {
-				type = Character.class;
-			} else {
-				throw new IndexOutOfBoundsException("Type could not be determined for array");
-			}
-
-		} else if (pos == 0) {
-			type = outTypeInfo.getTypeClass();
-		} else {
-			throw new IndexOutOfBoundsException("Position is out of range");
-		}
-		return type;
+	@SuppressWarnings("unchecked")
+	public <R> DataStream<R> setType(TypeInformation<R> outType) {
+		jobGraphBuilder.setOutType(id, outType);
+		typeInfo = outType;
+		return (DataStream<R>) this;
 	}
 
-	/**
-	 * Checks if the given field position is allowed for the output type
-	 * 
-	 * @param pos
-	 *            Position to check
-	 */
-	protected void checkFieldRange(int pos) {
-		try {
-			getClassAtPos(pos);
-		} catch (IndexOutOfBoundsException e) {
-			throw new RuntimeException("Selected field is out of range");
-
+	public <F> F clean(F f) {
+		if (getExecutionEnvironment().getConfig().isClosureCleanerEnabled()) {
+			ClosureCleaner.clean(f, true);
 		}
+		ClosureCleaner.ensureSerializable(f);
+		return f;
+	}
+
+	public StreamExecutionEnvironment getExecutionEnvironment() {
+		return environment;
 	}
 
 	/**
@@ -272,14 +221,6 @@ public class DataStream<OUT> {
 		return returnStream;
 	}
 
-	private void validateMerge(String id) {
-		for (DataStream<OUT> ds : this.mergedStreams) {
-			if (ds.getId().equals(id)) {
-				throw new RuntimeException("A DataStream cannot be merged with itself");
-			}
-		}
-	}
-
 	/**
 	 * Creates a new {@link ConnectedDataStream} by connecting
 	 * {@link DataStream} outputs of different type with each other. The
@@ -294,123 +235,114 @@ public class DataStream<OUT> {
 	}
 
 	/**
-	 * Creates a cross (Cartesian product) of a data stream window. The user can
-	 * implement their own time stamps or use the system time by default.
+	 * Groups the elements of a {@link DataStream} by the given key positions to
+	 * be used with grouped operators like
+	 * {@link GroupedDataStream#reduce(ReduceFunction)}
 	 * 
-	 * @param windowSize
-	 *            Size of the windows that will be aligned for both streams in
-	 *            milliseconds.
-	 * @param slideInterval
-	 *            After every function call the windows will be slid by this
-	 *            interval.
-	 * @param dataStreamToCross
-	 * @param windowSize
-	 * @param slideInterval
-	 * @return The transformed {@link DataStream}.
+	 * @param fields
+	 *            The position of the fields on which the {@link DataStream}
+	 *            will be grouped.
+	 * @return The grouped {@link DataStream}
 	 */
-	public <IN2> SingleOutputStreamOperator<Tuple2<OUT, IN2>, ?> windowCross(
-			DataStream<IN2> dataStreamToCross, long windowSize, long slideInterval) {
-		return this.windowCross(dataStreamToCross, windowSize, slideInterval,
-				new DefaultTimeStamp<OUT>(), new DefaultTimeStamp<IN2>());
+	public GroupedDataStream<OUT> groupBy(int... fields) {
+		if (getType() instanceof BasicArrayTypeInfo || getType() instanceof PrimitiveArrayTypeInfo) {
+			return groupBy(new KeySelectorUtil.ArrayKeySelector<OUT>(fields));
+		} else {
+			return groupBy(new Keys.ExpressionKeys<OUT>(fields, getType()));
+		}
 	}
 
 	/**
-	 * Creates a cross (Cartesian product) of a data stream window.
+	 * Groups a {@link DataStream} using field expressions. A field expression
+	 * is either the name of a public field or a getter method with parentheses
+	 * of the {@link DataStream}S underlying type. A dot can be used to drill
+	 * down into objects, as in {@code "field1.getInnerField2()" }. This method
+	 * returns an {@link GroupedDataStream}.
 	 * 
-	 * @param dataStreamToCross
-	 *            {@link DataStream} to cross with.
-	 * @param windowSize
-	 *            Size of the windows that will be aligned for both streams in
-	 *            milliseconds.
-	 * @param slideInterval
-	 *            After every function call the windows will be slid by this
-	 *            interval.
-	 * @param timestamp1
-	 *            User defined time stamps for the first input.
-	 * @param timestamp2
-	 *            User defined time stamps for the second input.
-	 * @return The transformed {@link DataStream}.
-	 */
-	public <IN2> SingleOutputStreamOperator<Tuple2<OUT, IN2>, ?> windowCross(
-			DataStream<IN2> dataStreamToCross, long windowSize, long slideInterval,
-			TimeStamp<OUT> timestamp1, TimeStamp<IN2> timestamp2) {
-		return this.connect(dataStreamToCross).windowCross(windowSize, slideInterval, timestamp1,
-				timestamp2);
+	 * @param fields
+	 *            One or more field expressions on which the DataStream will be
+	 *            grouped.
+	 * @return The grouped {@link DataStream}
+	 **/
+	public GroupedDataStream<OUT> groupBy(String... fields) {
+
+		return groupBy(new Keys.ExpressionKeys<OUT>(fields, getType()));
+
 	}
 
 	/**
-	 * Creates a join of a data stream based on the given positions.
+	 * Groups the elements of a {@link DataStream} by the key extracted by the
+	 * {@link KeySelector} to be used with grouped operators like
+	 * {@link GroupedDataStream#reduce(ReduceFunction)}
 	 * 
-	 * @param dataStreamToJoin
-	 *            {@link DataStream} to join with.
-	 * @param windowSize
-	 *            Size of the windows that will be aligned for both streams in
-	 *            milliseconds.
-	 * @param slideInterval
-	 *            After every function call the windows will be slid by this
-	 *            interval.
-	 * @param fieldIn1
-	 *            The field in the first stream to be matched.
-	 * @param fieldIn2
-	 *            The field in the second stream to be matched.
-	 * @return The transformed {@link DataStream}.
+	 * @param keySelector
+	 *            The {@link KeySelector} that will be used to extract keys for
+	 *            the values
+	 * @return The grouped {@link DataStream}
 	 */
-	public <IN2> SingleOutputStreamOperator<Tuple2<OUT, IN2>, ?> windowJoin(
-			DataStream<IN2> dataStreamToJoin, long windowSize, long slideInterval, int fieldIn1,
-			int fieldIn2) {
-		return this.windowJoin(dataStreamToJoin, windowSize, slideInterval,
-				new DefaultTimeStamp<OUT>(), new DefaultTimeStamp<IN2>(), fieldIn1, fieldIn2);
+	public GroupedDataStream<OUT> groupBy(KeySelector<OUT, ?> keySelector) {
+		return new GroupedDataStream<OUT>(this, clean(keySelector));
+	}
+
+	private GroupedDataStream<OUT> groupBy(Keys<OUT> keys) {
+		return new GroupedDataStream<OUT>(this, clean(KeySelectorUtil.getSelectorForKeys(keys,
+				getType())));
 	}
 
 	/**
-	 * Creates a join of a data stream based on the given positions.
-	 * 
-	 * @param dataStreamToJoin
-	 *            {@link DataStream} to join with.
-	 * @param windowSize
-	 *            Size of the windows that will be aligned for both streams in
-	 *            milliseconds.
-	 * @param slideInterval
-	 *            After every function call the windows will be slid by this
-	 *            interval.
-	 * @param timestamp1
-	 *            User defined time stamps for the first input.
-	 * @param timestamp2
-	 *            User defined time stamps for the second input.
-	 * @param fieldIn1
-	 *            The field in the first stream to be matched.
-	 * @param fieldIn2
-	 *            The field in the second stream to be matched.
-	 * @return The transformed {@link DataStream}.
-	 */
-	public <IN2> SingleOutputStreamOperator<Tuple2<OUT, IN2>, ?> windowJoin(
-			DataStream<IN2> dataStreamToJoin, long windowSize, long slideInterval,
-			TimeStamp<OUT> timestamp1, TimeStamp<IN2> timestamp2, int fieldIn1, int fieldIn2) {
-		return this.connect(dataStreamToJoin).windowJoin(windowSize, slideInterval, timestamp1,
-				timestamp2, fieldIn1, fieldIn2);
-	}
-
-	/**
-	 * Sets the partitioning of the {@link DataStream} so that the output tuples
-	 * are partitioned by the hashcodes of the selected fields.
+	 * Sets the partitioning of the {@link DataStream} so that the output is
+	 * partitioned by the selected fields. This setting only effects the how the
+	 * outputs will be distributed between the parallel instances of the next
+	 * processing operator.
 	 * 
 	 * @param fields
 	 *            The fields to partition by.
 	 * @return The DataStream with fields partitioning set.
 	 */
 	public DataStream<OUT> partitionBy(int... fields) {
-
-		return setConnectionType(new FieldsPartitioner<OUT>(new FieldsKeySelector<OUT>(
-				getOutputType(), fields)));
+		if (getType() instanceof BasicArrayTypeInfo || getType() instanceof PrimitiveArrayTypeInfo) {
+			return partitionBy(new KeySelectorUtil.ArrayKeySelector<OUT>(fields));
+		} else {
+			return partitionBy(new Keys.ExpressionKeys<OUT>(fields, getType()));
+		}
 	}
 
+	/**
+	 * Sets the partitioning of the {@link DataStream} so that the output is
+	 * partitioned by the given field expressions. This setting only effects the
+	 * how the outputs will be distributed between the parallel instances of the
+	 * next processing operator.
+	 * 
+	 * @param fields
+	 *            The fields expressions to partition by.
+	 * @return The DataStream with fields partitioning set.
+	 */
+	public DataStream<OUT> partitionBy(String... fields) {
+		return partitionBy(new Keys.ExpressionKeys<OUT>(fields, getType()));
+	}
+
+	private DataStream<OUT> partitionBy(Keys<OUT> keys) {
+		return partitionBy(KeySelectorUtil.getSelectorForKeys(keys, getType()));
+	}
+
+	/**
+	 * Sets the partitioning of the {@link DataStream} so that the output is
+	 * partitioned using the given {@link KeySelector}. This setting only
+	 * effects the how the outputs will be distributed between the parallel
+	 * instances of the next processing operator.
+	 * 
+	 * @param keySelector
+	 * @return
+	 */
 	public DataStream<OUT> partitionBy(KeySelector<OUT, ?> keySelector) {
-		return setConnectionType(new FieldsPartitioner<OUT>(keySelector));
+		return setConnectionType(new FieldsPartitioner<OUT>(clean(keySelector)));
 	}
 
 	/**
 	 * Sets the partitioning of the {@link DataStream} so that the output tuples
-	 * are broadcasted to every parallel instance of the next component.
+	 * are broadcasted to every parallel instance of the next component. This
+	 * setting only effects the how the outputs will be distributed between the
+	 * parallel instances of the next processing operator.
 	 * 
 	 * @return The DataStream with broadcast partitioning set.
 	 */
@@ -420,7 +352,9 @@ public class DataStream<OUT> {
 
 	/**
 	 * Sets the partitioning of the {@link DataStream} so that the output tuples
-	 * are shuffled to the next component.
+	 * are shuffled to the next component. This setting only effects the how the
+	 * outputs will be distributed between the parallel instances of the next
+	 * processing operator.
 	 * 
 	 * @return The DataStream with shuffle partitioning set.
 	 */
@@ -430,23 +364,83 @@ public class DataStream<OUT> {
 
 	/**
 	 * Sets the partitioning of the {@link DataStream} so that the output tuples
-	 * are forwarded to the local subtask of the next component. This is the
-	 * default partitioner setting.
+	 * are forwarded to the local subtask of the next component (whenever
+	 * possible). This is the default partitioner setting. This setting only
+	 * effects the how the outputs will be distributed between the parallel
+	 * instances of the next processing operator.
 	 * 
 	 * @return The DataStream with shuffle partitioning set.
 	 */
 	public DataStream<OUT> forward() {
-		return setConnectionType(new ForwardPartitioner<OUT>());
+		return setConnectionType(new DistributePartitioner<OUT>(true));
 	}
 
 	/**
 	 * Sets the partitioning of the {@link DataStream} so that the output tuples
-	 * are distributed evenly to the next component.
+	 * are distributed evenly to the next component.This setting only effects
+	 * the how the outputs will be distributed between the parallel instances of
+	 * the next processing operator.
 	 * 
 	 * @return The DataStream with shuffle partitioning set.
 	 */
 	public DataStream<OUT> distribute() {
-		return setConnectionType(new DistributePartitioner<OUT>());
+		return setConnectionType(new DistributePartitioner<OUT>(false));
+	}
+
+	/**
+	 * Initiates an iterative part of the program that feeds back data streams.
+	 * The iterative part needs to be closed by calling
+	 * {@link IterativeDataStream#closeWith(DataStream)}. The transformation of
+	 * this IterativeDataStream will be the iteration head. The data stream
+	 * given to the {@link IterativeDataStream#closeWith(DataStream)} method is
+	 * the data stream that will be fed back and used as the input for the
+	 * iteration head. A common usage pattern for streaming iterations is to use
+	 * output splitting to send a part of the closing data stream to the head.
+	 * Refer to {@link SingleOutputStreamOperator#split(outputSelector)} for
+	 * more information.
+	 * <p>
+	 * The iteration edge will be partitioned the same way as the first input of
+	 * the iteration head.
+	 * <p>
+	 * By default a DataStream with iteration will never terminate, but the user
+	 * can use the the maxWaitTime parameter to set a max waiting time for the
+	 * iteration head. If no data received in the set time, the stream
+	 * terminates.
+	 * 
+	 * @return The iterative data stream created.
+	 */
+	public IterativeDataStream<OUT> iterate() {
+		return new IterativeDataStream<OUT>(this, 0);
+	}
+
+	/**
+	 * Initiates an iterative part of the program that feeds back data streams.
+	 * The iterative part needs to be closed by calling
+	 * {@link IterativeDataStream#closeWith(DataStream)}. The transformation of
+	 * this IterativeDataStream will be the iteration head. The data stream
+	 * given to the {@link IterativeDataStream#closeWith(DataStream)} method is
+	 * the data stream that will be fed back and used as the input for the
+	 * iteration head. A common usage pattern for streaming iterations is to use
+	 * output splitting to send a part of the closing data stream to the head.
+	 * Refer to {@link SingleOutputStreamOperator#split(outputSelector)} for
+	 * more information.
+	 * <p>
+	 * The iteration edge will be partitioned the same way as the first input of
+	 * the iteration head.
+	 * <p>
+	 * By default a DataStream with iteration will never terminate, but the user
+	 * can use the the maxWaitTime parameter to set a max waiting time for the
+	 * iteration head. If no data received in the set time, the stream
+	 * terminates.
+	 * 
+	 * @param maxWaitTimeMillis
+	 *            Number of milliseconds to wait between inputs before shutting
+	 *            down
+	 * 
+	 * @return The iterative data stream created.
+	 */
+	public IterativeDataStream<OUT> iterate(long maxWaitTimeMillis) {
+		return new IterativeDataStream<OUT>(this, maxWaitTimeMillis);
 	}
 
 	/**
@@ -464,13 +458,10 @@ public class DataStream<OUT> {
 	 * @return The transformed {@link DataStream}.
 	 */
 	public <R> SingleOutputStreamOperator<R, ?> map(MapFunction<OUT, R> mapper) {
-		FunctionTypeWrapper<OUT> inTypeWrapper = new FunctionTypeWrapper<OUT>(mapper,
-				MapFunction.class, 0);
-		FunctionTypeWrapper<R> outTypeWrapper = new FunctionTypeWrapper<R>(mapper,
-				MapFunction.class, 1);
 
-		return addFunction("map", mapper, inTypeWrapper, outTypeWrapper, new MapInvokable<OUT, R>(
-				mapper));
+		TypeInformation<R> outType = TypeExtractor.getMapReturnTypes(clean(mapper), getType());
+
+		return transform("map", outType, new MapInvokable<OUT, R>(clean(mapper)));
 	}
 
 	/**
@@ -490,13 +481,12 @@ public class DataStream<OUT> {
 	 * @return The transformed {@link DataStream}.
 	 */
 	public <R> SingleOutputStreamOperator<R, ?> flatMap(FlatMapFunction<OUT, R> flatMapper) {
-		FunctionTypeWrapper<OUT> inTypeWrapper = new FunctionTypeWrapper<OUT>(flatMapper,
-				FlatMapFunction.class, 0);
-		FunctionTypeWrapper<R> outTypeWrapper = new FunctionTypeWrapper<R>(flatMapper,
-				FlatMapFunction.class, 1);
 
-		return addFunction("flatMap", flatMapper, inTypeWrapper, outTypeWrapper,
-				new FlatMapInvokable<OUT, R>(flatMapper));
+		TypeInformation<R> outType = TypeExtractor.getFlatMapReturnTypes(clean(flatMapper),
+				getType());
+
+		return transform("flatMap", outType, new FlatMapInvokable<OUT, R>(clean(flatMapper)));
+
 	}
 
 	/**
@@ -511,9 +501,28 @@ public class DataStream<OUT> {
 	 * @return The transformed DataStream.
 	 */
 	public SingleOutputStreamOperator<OUT, ?> reduce(ReduceFunction<OUT> reducer) {
-		return addFunction("reduce", reducer, new FunctionTypeWrapper<OUT>(reducer,
-				ReduceFunction.class, 0), new FunctionTypeWrapper<OUT>(reducer,
-				ReduceFunction.class, 0), new StreamReduceInvokable<OUT>(reducer));
+
+		return transform("reduce", getType(), new StreamReduceInvokable<OUT>(clean(reducer)));
+
+	}
+
+	/**
+	 * Applies a Filter transformation on a {@link DataStream}. The
+	 * transformation calls a {@link FilterFunction} for each element of the
+	 * DataStream and retains only those element for which the function returns
+	 * true. Elements for which the function returns false are filtered. The
+	 * user can also extend {@link RichFilterFunction} to gain access to other
+	 * features provided by the
+	 * {@link org.apache.flink.api.common.functions.RichFunction} interface.
+	 * 
+	 * @param filter
+	 *            The FilterFunction that is called for each element of the
+	 *            DataSet.
+	 * @return The filtered DataStream.
+	 */
+	public SingleOutputStreamOperator<OUT, ?> filter(FilterFunction<OUT> filter) {
+		return transform("filter", getType(), new FilterInvokable<OUT>(clean(filter)));
+
 	}
 
 	/**
@@ -540,126 +549,51 @@ public class DataStream<OUT> {
 	}
 
 	/**
-	 * Groups the elements of a {@link DataStream} by the given key positions to
-	 * be used with grouped operators like
-	 * {@link GroupedDataStream#reduce(ReduceFunction)}
+	 * Initiates a temporal Cross transformation.<br/>
+	 * A Cross transformation combines the elements of two {@link DataStream}s
+	 * into one DataStream over a specified time window. It builds all pair
+	 * combinations of elements of both DataStreams, i.e., it builds a Cartesian
+	 * product.
 	 * 
-	 * @param fields
-	 *            The position of the fields on which the {@link DataStream}
-	 *            will be grouped.
-	 * @return The transformed {@link DataStream}
+	 * <p>
+	 * This method returns a {@link StreamCrossOperator} on which the
+	 * {@link StreamCrossOperator#onWindow} should be called to define the
+	 * window.
+	 * <p>
+	 * Call {@link StreamCrossOperator.CrossWindow#with(crossFunction)} to
+	 * define a custom cross function.
+	 * 
+	 * @param dataStreamToCross
+	 *            The other DataStream with which this DataStream is crossed.
+	 * @return A {@link StreamCrossOperator} to continue the definition of the
+	 *         cross transformation.
+	 * 
 	 */
-	public GroupedDataStream<OUT> groupBy(int... fields) {
-		return groupBy(new FieldsKeySelector<OUT>(getOutputType(), fields));
+	public <IN2> StreamCrossOperator<OUT, IN2> cross(DataStream<IN2> dataStreamToCross) {
+		return new StreamCrossOperator<OUT, IN2>(this, dataStreamToCross);
 	}
 
 	/**
-	 * Groups the elements of a {@link DataStream} by the key extracted by the
-	 * {@link KeySelector} to be used with grouped operators like
-	 * {@link GroupedDataStream#reduce(ReduceFunction)}
+	 * Initiates a temporal Join transformation. <br/>
+	 * A temporal Join transformation joins the elements of two
+	 * {@link DataStream}s on key equality over a specified time window.</br>
 	 * 
-	 * @param keySelector
-	 *            The {@link KeySelector} that will be used to extract keys for
-	 *            the values
-	 * @return The transformed {@link DataStream}
-	 */
-	public GroupedDataStream<OUT> groupBy(KeySelector<OUT, ?> keySelector) {
-		return new GroupedDataStream<OUT>(this, keySelector);
-	}
-
-	/**
-	 * Collects the data stream elements into sliding batches creating a new
-	 * {@link BatchedDataStream}. The user can apply transformations like
-	 * {@link BatchedDataStream#reduce}, {@link BatchedDataStream#reduceGroup}
-	 * or aggregations on the {@link BatchedDataStream}.
+	 * This method returns a {@link StreamJoinOperator} on which the
+	 * {@link StreamJoinOperator#onWindow} should be called to define the
+	 * window, and then the {@link StreamJoinOperator.JoinWindow#where} and
+	 * {@link StreamJoinOperator.JoinPredicate#equalTo} can be used to define
+	 * the join keys.</p> The user can also use the
+	 * {@link StreamJoinOperator.JoinedStream#with(joinFunction)} to apply
+	 * custom join function.
 	 * 
-	 * @param batchSize
-	 *            The number of elements in each batch at each operator
-	 * @param slideSize
-	 *            The number of elements with which the batches are slid by
-	 *            after each transformation.
-	 * @return The transformed {@link DataStream}
-	 */
-	public BatchedDataStream<OUT> batch(long batchSize, long slideSize) {
-		if (batchSize < 1) {
-			throw new IllegalArgumentException("Batch size must be positive");
-		}
-		if (slideSize < 1) {
-			throw new IllegalArgumentException("Slide size must be positive");
-		}
-		return new BatchedDataStream<OUT>(this, batchSize, slideSize);
-	}
-
-	/**
-	 * Collects the data stream elements into sliding batches creating a new
-	 * {@link BatchedDataStream}. The user can apply transformations like
-	 * {@link BatchedDataStream#reduce}, {@link BatchedDataStream#reduceGroup}
-	 * or aggregations on the {@link BatchedDataStream}.
+	 * @param other
+	 *            The other DataStream with which this DataStream is joined.
+	 * @return A {@link StreamJoinOperator} to continue the definition of the
+	 *         Join transformation.
 	 * 
-	 * @param batchSize
-	 *            The number of elements in each batch at each operator
-	 * @return The transformed {@link DataStream}
 	 */
-	public BatchedDataStream<OUT> batch(long batchSize) {
-		return batch(batchSize, batchSize);
-	}
-
-	/**
-	 * Collects the data stream elements into sliding windows creating a new
-	 * {@link WindowDataStream}. The user can apply transformations like
-	 * {@link WindowDataStream#reduce}, {@link WindowDataStream#reduceGroup} or
-	 * aggregations on the {@link WindowDataStream}.
-	 * 
-	 * @param windowSize
-	 *            The length of the window in milliseconds.
-	 * @param slideInterval
-	 *            The number of milliseconds with which the windows are slid by
-	 *            after each transformation.
-	 * @param timestamp
-	 *            User defined function for extracting time-stamps from each
-	 *            element
-	 * @return The transformed {@link DataStream}
-	 */
-	public WindowDataStream<OUT> window(long windowSize, long slideInterval,
-			TimeStamp<OUT> timestamp) {
-		if (windowSize < 1) {
-			throw new IllegalArgumentException("Window size must be positive");
-		}
-		if (slideInterval < 1) {
-			throw new IllegalArgumentException("Slide interval must be positive");
-		}
-		return new WindowDataStream<OUT>(this, windowSize, slideInterval, timestamp);
-	}
-
-	/**
-	 * Collects the data stream elements into sliding windows creating a new
-	 * {@link WindowDataStream}. The user can apply transformations like
-	 * {@link WindowDataStream#reduce}, {@link WindowDataStream#reduceGroup} or
-	 * aggregations on the {@link WindowDataStream}.
-	 * 
-	 * @param windowSize
-	 *            The length of the window in milliseconds.
-	 * @param slideInterval
-	 *            The number of milliseconds with which the windows are slid by
-	 *            after each transformation.
-	 * @return The transformed {@link DataStream}
-	 */
-	public WindowDataStream<OUT> window(long windowSize, long slideInterval) {
-		return window(windowSize, slideInterval, new DefaultTimeStamp<OUT>());
-	}
-
-	/**
-	 * Collects the data stream elements into sliding windows creating a new
-	 * {@link WindowDataStream}. The user can apply transformations like
-	 * {@link WindowDataStream#reduce}, {@link WindowDataStream#reduceGroup} or
-	 * aggregations on the {@link WindowDataStream}.
-	 * 
-	 * @param windowSize
-	 *            The length of the window in milliseconds.
-	 * @return The transformed {@link DataStream}
-	 */
-	public WindowDataStream<OUT> window(long windowSize) {
-		return window(windowSize, windowSize);
+	public <IN2> StreamJoinOperator<OUT, IN2> join(DataStream<IN2> dataStreamToJoin) {
+		return new StreamJoinOperator<OUT, IN2>(this, dataStreamToJoin);
 	}
 
 	/**
@@ -669,25 +603,31 @@ public class DataStream<OUT> {
 	 *            The position in the data point to sum
 	 * @return The transformed DataStream.
 	 */
-	@SuppressWarnings("unchecked")
 	public SingleOutputStreamOperator<OUT, ?> sum(int positionToSum) {
 		checkFieldRange(positionToSum);
-		return aggregate((AggregationFunction<OUT>) SumAggregationFunction.getSumFunction(
-				positionToSum, getClassAtPos(positionToSum), getOutputType()));
+		return aggregate((AggregationFunction<OUT>) SumAggregator.getSumFunction(positionToSum,
+				getClassAtPos(positionToSum), getType()));
 	}
 
 	/**
-	 * Syntactic sugar for sum(0)
+	 * Applies an aggregation that that gives the current sum of the pojo data
+	 * stream at the given field expression. A field expression is either the
+	 * name of a public field or a getter method with parentheses of the
+	 * {@link DataStream}S underlying type. A dot can be used to drill down into
+	 * objects, as in {@code "field1.getInnerField2()" }.
 	 * 
+	 * @param field
+	 *            The field expression based on which the aggregation will be
+	 *            applied.
 	 * @return The transformed DataStream.
 	 */
-	public SingleOutputStreamOperator<OUT, ?> sum() {
-		return sum(0);
+	public SingleOutputStreamOperator<OUT, ?> sum(String field) {
+		return aggregate((AggregationFunction<OUT>) SumAggregator.getSumFunction(field, getType()));
 	}
 
 	/**
-	 * Applies an aggregation that that gives the minimum of the data stream at
-	 * the given position.
+	 * Applies an aggregation that that gives the current minimum of the data
+	 * stream at the given position.
 	 * 
 	 * @param positionToMin
 	 *            The position in the data point to minimize
@@ -695,7 +635,96 @@ public class DataStream<OUT> {
 	 */
 	public SingleOutputStreamOperator<OUT, ?> min(int positionToMin) {
 		checkFieldRange(positionToMin);
-		return aggregate(new MinAggregationFunction<OUT>(positionToMin, getOutputType()));
+		return aggregate(ComparableAggregator.getAggregator(positionToMin, getType(),
+				AggregationType.MIN));
+	}
+
+	/**
+	 * Applies an aggregation that that gives the current minimum of the pojo
+	 * data stream at the given field expression. A field expression is either
+	 * the name of a public field or a getter method with parentheses of the
+	 * {@link DataStream}S underlying type. A dot can be used to drill down into
+	 * objects, as in {@code "field1.getInnerField2()" }.
+	 * 
+	 * @param field
+	 *            The field expression based on which the aggregation will be
+	 *            applied.
+	 * @return The transformed DataStream.
+	 */
+	public SingleOutputStreamOperator<OUT, ?> min(String field) {
+		return aggregate(ComparableAggregator.getAggregator(field, getType(), AggregationType.MIN,
+				false));
+	}
+
+	/**
+	 * Applies an aggregation that gives the current maximum of the data stream
+	 * at the given position.
+	 * 
+	 * @param positionToMax
+	 *            The position in the data point to maximize
+	 * @return The transformed DataStream.
+	 */
+	public SingleOutputStreamOperator<OUT, ?> max(int positionToMax) {
+		checkFieldRange(positionToMax);
+		return aggregate(ComparableAggregator.getAggregator(positionToMax, getType(),
+				AggregationType.MAX));
+	}
+
+	/**
+	 * Applies an aggregation that that gives the current maximum of the pojo
+	 * data stream at the given field expression. A field expression is either
+	 * the name of a public field or a getter method with parentheses of the
+	 * {@link DataStream}S underlying type. A dot can be used to drill down into
+	 * objects, as in {@code "field1.getInnerField2()" }.
+	 * 
+	 * @param field
+	 *            The field expression based on which the aggregation will be
+	 *            applied.
+	 * @return The transformed DataStream.
+	 */
+	public SingleOutputStreamOperator<OUT, ?> max(String field) {
+		return aggregate(ComparableAggregator.getAggregator(field, getType(), AggregationType.MAX,
+				false));
+	}
+
+	/**
+	 * Applies an aggregation that that gives the current minimum element of the
+	 * pojo data stream by the given field expression. A field expression is
+	 * either the name of a public field or a getter method with parentheses of
+	 * the {@link DataStream}S underlying type. A dot can be used to drill down
+	 * into objects, as in {@code "field1.getInnerField2()" }.
+	 * 
+	 * @param field
+	 *            The field expression based on which the aggregation will be
+	 *            applied.
+	 * @param first
+	 *            If True then in case of field equality the first object will
+	 *            be returned
+	 * @return The transformed DataStream.
+	 */
+	public SingleOutputStreamOperator<OUT, ?> minBy(String field, boolean first) {
+		return aggregate(ComparableAggregator.getAggregator(field, getType(),
+				AggregationType.MINBY, first));
+	}
+
+	/**
+	 * Applies an aggregation that that gives the current maximum element of the
+	 * pojo data stream by the given field expression. A field expression is
+	 * either the name of a public field or a getter method with parentheses of
+	 * the {@link DataStream}S underlying type. A dot can be used to drill down
+	 * into objects, as in {@code "field1.getInnerField2()" }.
+	 * 
+	 * @param field
+	 *            The field expression based on which the aggregation will be
+	 *            applied.
+	 * @param first
+	 *            If True then in case of field equality the first object will
+	 *            be returned
+	 * @return The transformed DataStream.
+	 */
+	public SingleOutputStreamOperator<OUT, ?> maxBy(String field, boolean first) {
+		return aggregate(ComparableAggregator.getAggregator(field, getType(),
+				AggregationType.MAXBY, first));
 	}
 
 	/**
@@ -715,6 +744,20 @@ public class DataStream<OUT> {
 	/**
 	 * Applies an aggregation that that gives the current element with the
 	 * minimum value at the given position, if more elements have the minimum
+	 * value at the given position, the operator returns the first one by
+	 * default.
+	 * 
+	 * @param positionToMinBy
+	 *            The position in the data point to minimize
+	 * @return The transformed DataStream.
+	 */
+	public SingleOutputStreamOperator<OUT, ?> minBy(String positionToMinBy) {
+		return this.minBy(positionToMinBy, true);
+	}
+
+	/**
+	 * Applies an aggregation that that gives the current element with the
+	 * minimum value at the given position, if more elements have the minimum
 	 * value at the given position, the operator returns either the first or
 	 * last one, depending on the parameter set.
 	 * 
@@ -727,29 +770,8 @@ public class DataStream<OUT> {
 	 */
 	public SingleOutputStreamOperator<OUT, ?> minBy(int positionToMinBy, boolean first) {
 		checkFieldRange(positionToMinBy);
-		return aggregate(new MinByAggregationFunction<OUT>(positionToMinBy, first, getOutputType()));
-	}
-
-	/**
-	 * Syntactic sugar for min(0)
-	 * 
-	 * @return The transformed DataStream.
-	 */
-	public SingleOutputStreamOperator<OUT, ?> min() {
-		return min(0);
-	}
-
-	/**
-	 * Applies an aggregation that gives the maximum of the data stream at the
-	 * given position.
-	 * 
-	 * @param positionToMax
-	 *            The position in the data point to maximize
-	 * @return The transformed DataStream.
-	 */
-	public SingleOutputStreamOperator<OUT, ?> max(int positionToMax) {
-		checkFieldRange(positionToMax);
-		return aggregate(new MaxAggregationFunction<OUT>(positionToMax, getOutputType()));
+		return aggregate(ComparableAggregator.getAggregator(positionToMinBy, getType(),
+				AggregationType.MINBY, first));
 	}
 
 	/**
@@ -769,6 +791,20 @@ public class DataStream<OUT> {
 	/**
 	 * Applies an aggregation that that gives the current element with the
 	 * maximum value at the given position, if more elements have the maximum
+	 * value at the given position, the operator returns the first one by
+	 * default.
+	 * 
+	 * @param positionToMaxBy
+	 *            The position in the data point to maximize
+	 * @return The transformed DataStream.
+	 */
+	public SingleOutputStreamOperator<OUT, ?> maxBy(String positionToMaxBy) {
+		return this.maxBy(positionToMaxBy, true);
+	}
+
+	/**
+	 * Applies an aggregation that that gives the current element with the
+	 * maximum value at the given position, if more elements have the maximum
 	 * value at the given position, the operator returns either the first or
 	 * last one, depending on the parameter set.
 	 * 
@@ -781,90 +817,97 @@ public class DataStream<OUT> {
 	 */
 	public SingleOutputStreamOperator<OUT, ?> maxBy(int positionToMaxBy, boolean first) {
 		checkFieldRange(positionToMaxBy);
-		return aggregate(new MaxByAggregationFunction<OUT>(positionToMaxBy, first, getOutputType()));
+		return aggregate(ComparableAggregator.getAggregator(positionToMaxBy, getType(),
+				AggregationType.MAXBY, first));
 	}
 
 	/**
-	 * Syntactic sugar for max(0)
-	 * 
-	 * @return The transformed DataStream.
-	 */
-	public SingleOutputStreamOperator<OUT, ?> max() {
-		return max(0);
-	}
-
-	/**
-	 * Applies an aggregation that gives the count of the data point.
+	 * Creates a new DataStream containing the current number (count) of
+	 * received records.
 	 * 
 	 * @return The transformed DataStream.
 	 */
 	public SingleOutputStreamOperator<Long, ?> count() {
-		TypeWrapper<OUT> inTypeWrapper = outTypeWrapper;
-		TypeWrapper<Long> outTypeWrapper = new ObjectTypeWrapper<Long>(new Long(0));
+		TypeInformation<Long> outTypeInfo = TypeExtractor.getForObject(Long.valueOf(0));
 
-		return addFunction("counter", null, inTypeWrapper, outTypeWrapper,
-				new CounterInvokable<OUT>());
-	}
-
-	protected SingleOutputStreamOperator<OUT, ?> aggregate(AggregationFunction<OUT> aggregate) {
-
-		StreamReduceInvokable<OUT> invokable = new StreamReduceInvokable<OUT>(aggregate);
-
-		SingleOutputStreamOperator<OUT, ?> returnStream = addFunction("reduce", aggregate,
-				outTypeWrapper, outTypeWrapper, invokable);
-
-		return returnStream;
+		return transform("counter", outTypeInfo, new CounterInvokable<OUT>());
 	}
 
 	/**
-	 * Applies a Filter transformation on a {@link DataStream}. The
-	 * transformation calls a {@link FilterFunction} for each element of the
-	 * DataStream and retains only those element for which the function returns
-	 * true. Elements for which the function returns false are filtered. The
-	 * user can also extend {@link RichFilterFunction} to gain access to other
-	 * features provided by the
-	 * {@link org.apache.flink.api.common.functions.RichFunction} interface.
+	 * Create a {@link WindowedDataStream} that can be used to apply
+	 * transformation like {@link WindowedDataStream#reduce} or aggregations on
+	 * preset chunks(windows) of the data stream. To define the windows one or
+	 * more {@link WindowingHelper} such as {@link Time}, {@link Count} and
+	 * {@link Delta} can be used.</br></br> When applied to a grouped data
+	 * stream, the windows (evictions) and slide sizes (triggers) will be
+	 * computed on a per group basis. </br></br> For more advanced control over
+	 * the trigger and eviction policies please refer to
+	 * {@link #window(triggers, evicters)} </br> </br> For example to create a
+	 * sum every 5 seconds in a tumbling fashion:</br>
+	 * {@code ds.window(Time.of(5, TimeUnit.SECONDS)).sum(field)} </br></br> To
+	 * create sliding windows use the
+	 * {@link WindowedDataStream#every(WindowingHelper...)} </br></br> The same
+	 * example with 3 second slides:</br>
 	 * 
-	 * @param filter
-	 *            The FilterFunction that is called for each element of the
-	 *            DataSet.
-	 * @return The filtered DataStream.
+	 * {@code ds.window(Time.of(5, TimeUnit.SECONDS)).every(Time.of(3,
+	 *       TimeUnit.SECONDS)).sum(field)}
+	 * 
+	 * @param policyHelpers
+	 *            Any {@link WindowingHelper} such as {@link Time},
+	 *            {@link Count} and {@link Delta} to define the window.
+	 * @return A {@link WindowedDataStream} providing further operations.
 	 */
-	public SingleOutputStreamOperator<OUT, ?> filter(FilterFunction<OUT> filter) {
-		FunctionTypeWrapper<OUT> typeWrapper = new FunctionTypeWrapper<OUT>(filter,
-				FilterFunction.class, 0);
-
-		return addFunction("filter", filter, typeWrapper, typeWrapper, new FilterInvokable<OUT>(
-				filter));
+	@SuppressWarnings({ "rawtypes", "unchecked" })
+	public WindowedDataStream<OUT> window(WindowingHelper... policyHelpers) {
+		return new WindowedDataStream<OUT>(this, policyHelpers);
 	}
 
 	/**
-	 * Writes a DataStream to the standard output stream (stdout). For each
-	 * element of the DataStream the result of {@link Object#toString()} is
-	 * written.
+	 * Create a {@link WindowedDataStream} using the given {@link TriggerPolicy}
+	 * s and {@link EvictionPolicy}s. Windowing can be used to apply
+	 * transformation like {@link WindowedDataStream#reduce} or aggregations on
+	 * preset chunks(windows) of the data stream.</br></br>For most common
+	 * use-cases please refer to {@link #window(WindowingHelper...)}
+	 * 
+	 * @param triggers
+	 *            The list of {@link TriggerPolicy}s that will determine how
+	 *            often the user function is called on the window.
+	 * @param evicters
+	 *            The list of {@link EvictionPolicy}s that will determine the
+	 *            number of elements in each time window.
+	 * @return A {@link WindowedDataStream} providing further operations.
+	 */
+	public WindowedDataStream<OUT> window(List<TriggerPolicy<OUT>> triggers,
+			List<EvictionPolicy<OUT>> evicters) {
+		return new WindowedDataStream<OUT>(this, triggers, evicters);
+	}
+
+	/**
+	 * Writes a DataStream to the standard output stream (stdout).<br>
+	 * For each element of the DataStream the result of
+	 * {@link Object#toString()} is written.
 	 * 
 	 * @return The closed DataStream.
 	 */
 	public DataStreamSink<OUT> print() {
-		DataStream<OUT> inputStream = this.copy();
 		PrintSinkFunction<OUT> printFunction = new PrintSinkFunction<OUT>();
-		DataStreamSink<OUT> returnStream = addSink(inputStream, printFunction, outTypeWrapper);
+		DataStreamSink<OUT> returnStream = addSink(printFunction);
 
 		return returnStream;
 	}
 
 	/**
-	 * Writes a DataStream to the file specified by path in text format. For
-	 * every element of the DataStream the result of {@link Object#toString()}
-	 * is written.
+	 * Writes a DataStream to the standard output stream (stderr).<br>
+	 * For each element of the DataStream the result of
+	 * {@link Object#toString()} is written.
 	 * 
-	 * @param path
-	 *            is the path to the location where the tuples are written
-	 * 
-	 * @return The closed DataStream
+	 * @return The closed DataStream.
 	 */
-	public DataStreamSink<OUT> writeAsText(String path) {
-		return writeAsText(this, path, new WriteFormatAsText<OUT>(), 1, null);
+	public DataStreamSink<OUT> printToErr() {
+		PrintSinkFunction<OUT> printFunction = new PrintSinkFunction<OUT>(true);
+		DataStreamSink<OUT> returnStream = addSink(printFunction);
+
+		return returnStream;
 	}
 
 	/**
@@ -881,124 +924,7 @@ public class DataStream<OUT> {
 	 * @return The closed DataStream
 	 */
 	public DataStreamSink<OUT> writeAsText(String path, long millis) {
-		return writeAsText(this, path, new WriteFormatAsText<OUT>(), millis, null);
-	}
-
-	/**
-	 * Writes a DataStream to the file specified by path in text format. The
-	 * writing is performed periodically in equally sized batches. For every
-	 * element of the DataStream the result of {@link Object#toString()} is
-	 * written.
-	 * 
-	 * @param path
-	 *            is the path to the location where the tuples are written
-	 * @param batchSize
-	 *            is the size of the batches, i.e. the number of tuples written
-	 *            to the file at a time
-	 * 
-	 * @return The closed DataStream
-	 */
-	public DataStreamSink<OUT> writeAsText(String path, int batchSize) {
-		return writeAsText(this, path, new WriteFormatAsText<OUT>(), batchSize, null);
-	}
-
-	/**
-	 * Writes a DataStream to the file specified by path in text format. The
-	 * writing is performed periodically, in every millis milliseconds. For
-	 * every element of the DataStream the result of {@link Object#toString()}
-	 * is written.
-	 * 
-	 * @param path
-	 *            is the path to the location where the tuples are written
-	 * @param millis
-	 *            is the file update frequency
-	 * @param endTuple
-	 *            is a special tuple indicating the end of the stream. If an
-	 *            endTuple is caught, the last pending batch of tuples will be
-	 *            immediately appended to the target file regardless of the
-	 *            system time.
-	 * 
-	 * @return The closed DataStream
-	 */
-	public DataStreamSink<OUT> writeAsText(String path, long millis, OUT endTuple) {
-		return writeAsText(this, path, new WriteFormatAsText<OUT>(), millis, endTuple);
-	}
-
-	/**
-	 * Writes a DataStream to the file specified by path in text format. The
-	 * writing is performed periodically in equally sized batches. For every
-	 * element of the DataStream the result of {@link Object#toString()} is
-	 * written.
-	 * 
-	 * @param path
-	 *            is the path to the location where the tuples are written
-	 * @param batchSize
-	 *            is the size of the batches, i.e. the number of tuples written
-	 *            to the file at a time
-	 * @param endTuple
-	 *            is a special tuple indicating the end of the stream. If an
-	 *            endTuple is caught, the last pending batch of tuples will be
-	 *            immediately appended to the target file regardless of the
-	 *            batchSize.
-	 * 
-	 * @return The closed DataStream
-	 */
-	public DataStreamSink<OUT> writeAsText(String path, int batchSize, OUT endTuple) {
-		return writeAsText(this, path, new WriteFormatAsText<OUT>(), batchSize, endTuple);
-	}
-
-	/**
-	 * Writes a DataStream to the file specified by path in text format. The
-	 * writing is performed periodically, in every millis milliseconds. For
-	 * every element of the DataStream the result of {@link Object#toString()}
-	 * is written.
-	 * 
-	 * @param path
-	 *            is the path to the location where the tuples are written
-	 * @param millis
-	 *            is the file update frequency
-	 * @param endTuple
-	 *            is a special tuple indicating the end of the stream. If an
-	 *            endTuple is caught, the last pending batch of tuples will be
-	 *            immediately appended to the target file regardless of the
-	 *            system time.
-	 * 
-	 * @return the data stream constructed
-	 */
-	private DataStreamSink<OUT> writeAsText(DataStream<OUT> inputStream, String path,
-			WriteFormatAsText<OUT> format, long millis, OUT endTuple) {
-		DataStreamSink<OUT> returnStream = addSink(inputStream, new WriteSinkFunctionByMillis<OUT>(
-				path, format, millis, endTuple), inputStream.outTypeWrapper);
-		jobGraphBuilder.setMutability(returnStream.getId(), false);
-		return returnStream;
-	}
-
-	/**
-	 * Writes a DataStream to the file specified by path in text format. The
-	 * writing is performed periodically in equally sized batches. For every
-	 * element of the DataStream the result of {@link Object#toString()} is
-	 * written.
-	 * 
-	 * @param path
-	 *            is the path to the location where the tuples are written
-	 * @param batchSize
-	 *            is the size of the batches, i.e. the number of tuples written
-	 *            to the file at a time
-	 * @param endTuple
-	 *            is a special tuple indicating the end of the stream. If an
-	 *            endTuple is caught, the last pending batch of tuples will be
-	 *            immediately appended to the target file regardless of the
-	 *            batchSize.
-	 * 
-	 * @return the data stream constructed
-	 */
-	private DataStreamSink<OUT> writeAsText(DataStream<OUT> inputStream, String path,
-			WriteFormatAsText<OUT> format, int batchSize, OUT endTuple) {
-		DataStreamSink<OUT> returnStream = addSink(inputStream,
-				new WriteSinkFunctionByBatches<OUT>(path, format, batchSize, endTuple),
-				inputStream.outTypeWrapper);
-		jobGraphBuilder.setMutability(returnStream.getId(), false);
-		return returnStream;
+		return writeAsText(path, new WriteFormatAsText<OUT>(), millis);
 	}
 
 	/**
@@ -1011,8 +937,8 @@ public class DataStream<OUT> {
 	 * 
 	 * @return The closed DataStream
 	 */
-	public DataStreamSink<OUT> writeAsCsv(String path) {
-		return writeAsCsv(this, path, new WriteFormatAsCsv<OUT>(), 1, null);
+	public DataStreamSink<OUT> writeAsText(String path) {
+		return writeAsText(path, 0);
 	}
 
 	/**
@@ -1029,77 +955,28 @@ public class DataStream<OUT> {
 	 * @return The closed DataStream
 	 */
 	public DataStreamSink<OUT> writeAsCsv(String path, long millis) {
-		return writeAsCsv(this, path, new WriteFormatAsCsv<OUT>(), millis, null);
-	}
-
-	/**
-	 * Writes a DataStream to the file specified by path in text format. The
-	 * writing is performed periodically in equally sized batches. For every
-	 * element of the DataStream the result of {@link Object#toString()} is
-	 * written.
-	 * 
-	 * @param path
-	 *            is the path to the location where the tuples are written
-	 * @param batchSize
-	 *            is the size of the batches, i.e. the number of tuples written
-	 *            to the file at a time
-	 * 
-	 * @return The closed DataStream
-	 */
-	public DataStreamSink<OUT> writeAsCsv(String path, int batchSize) {
-		return writeAsCsv(this, path, new WriteFormatAsCsv<OUT>(), batchSize, null);
-	}
-
-	/**
-	 * Writes a DataStream to the file specified by path in text format. The
-	 * writing is performed periodically, in every millis milliseconds. For
-	 * every element of the DataStream the result of {@link Object#toString()}
-	 * is written.
-	 * 
-	 * @param path
-	 *            is the path to the location where the tuples are written
-	 * @param millis
-	 *            is the file update frequency
-	 * @param endTuple
-	 *            is a special tuple indicating the end of the stream. If an
-	 *            endTuple is caught, the last pending batch of tuples will be
-	 *            immediately appended to the target file regardless of the
-	 *            system time.
-	 * 
-	 * @return The closed DataStream
-	 */
-	public DataStreamSink<OUT> writeAsCsv(String path, long millis, OUT endTuple) {
-		return writeAsCsv(this, path, new WriteFormatAsCsv<OUT>(), millis, endTuple);
-	}
-
-	/**
-	 * Writes a DataStream to the file specified by path in text format. The
-	 * writing is performed periodically in equally sized batches. For every
-	 * element of the DataStream the result of {@link Object#toString()} is
-	 * written.
-	 * 
-	 * @param path
-	 *            is the path to the location where the tuples are written
-	 * @param batchSize
-	 *            is the size of the batches, i.e. the number of tuples written
-	 *            to the file at a time
-	 * @param endTuple
-	 *            is a special tuple indicating the end of the stream. If an
-	 *            endTuple is caught, the last pending batch of tuples will be
-	 *            immediately appended to the target file regardless of the
-	 *            batchSize.
-	 * 
-	 * @return The closed DataStream
-	 */
-	public DataStreamSink<OUT> writeAsCsv(String path, int batchSize, OUT endTuple) {
-		if (this instanceof SingleOutputStreamOperator) {
-			((SingleOutputStreamOperator<?, ?>) this).setMutability(false);
+		if (!getType().isTupleType()) {
+			throw new RuntimeException("Only tuple data streams can be written in csv format");
 		}
-		return writeAsCsv(this, path, new WriteFormatAsCsv<OUT>(), batchSize, endTuple);
+		return writeAsText(path, new WriteFormatAsCsv<OUT>(), millis);
 	}
 
 	/**
-	 * Writes a DataStream to the file specified by path in csv format. The
+	 * Writes a DataStream to the file specified by path in text format. For
+	 * every element of the DataStream the result of {@link Object#toString()}
+	 * is written.
+	 * 
+	 * @param path
+	 *            is the path to the location where the tuples are written
+	 * 
+	 * @return The closed DataStream
+	 */
+	public DataStreamSink<OUT> writeAsCsv(String path) {
+		return writeAsCsv(path, 0);
+	}
+
+	/**
+	 * Writes a DataStream to the file specified by path in text format. The
 	 * writing is performed periodically, in every millis milliseconds. For
 	 * every element of the DataStream the result of {@link Object#toString()}
 	 * is written.
@@ -1108,79 +985,27 @@ public class DataStream<OUT> {
 	 *            is the path to the location where the tuples are written
 	 * @param millis
 	 *            is the file update frequency
-	 * @param endTuple
-	 *            is a special tuple indicating the end of the stream. If an
-	 *            endTuple is caught, the last pending batch of tuples will be
-	 *            immediately appended to the target file regardless of the
-	 *            system time.
 	 * 
 	 * @return the data stream constructed
 	 */
-	private DataStreamSink<OUT> writeAsCsv(DataStream<OUT> inputStream, String path,
-			WriteFormatAsCsv<OUT> format, long millis, OUT endTuple) {
-		DataStreamSink<OUT> returnStream = addSink(inputStream, new WriteSinkFunctionByMillis<OUT>(
-				path, format, millis, endTuple), inputStream.outTypeWrapper);
-		jobGraphBuilder.setMutability(returnStream.getId(), false);
+	private DataStreamSink<OUT> writeAsText(String path, WriteFormat<OUT> format, long millis) {
+		DataStreamSink<OUT> returnStream = addSink(new WriteSinkFunctionByMillis<OUT>(path, format,
+				millis));
 		return returnStream;
 	}
 
-	/**
-	 * Writes a DataStream to the file specified by path in csv format. The
-	 * writing is performed periodically in equally sized batches. For every
-	 * element of the DataStream the result of {@link Object#toString()} is
-	 * written.
-	 * 
-	 * @param path
-	 *            is the path to the location where the tuples are written
-	 * @param batchSize
-	 *            is the size of the batches, i.e. the number of tuples written
-	 *            to the file at a time
-	 * @param endTuple
-	 *            is a special tuple indicating the end of the stream. If an
-	 *            endTuple is caught, the last pending batch of tuples will be
-	 *            immediately appended to the target file regardless of the
-	 *            batchSize.
-	 * 
-	 * @return the data stream constructed
-	 */
-	private DataStreamSink<OUT> writeAsCsv(DataStream<OUT> inputStream, String path,
-			WriteFormatAsCsv<OUT> format, int batchSize, OUT endTuple) {
-		DataStreamSink<OUT> returnStream = addSink(inputStream,
-				new WriteSinkFunctionByBatches<OUT>(path, format, batchSize, endTuple),
-				inputStream.outTypeWrapper);
-		jobGraphBuilder.setMutability(returnStream.getId(), false);
+	protected SingleOutputStreamOperator<OUT, ?> aggregate(AggregationFunction<OUT> aggregate) {
+
+		StreamReduceInvokable<OUT> invokable = new StreamReduceInvokable<OUT>(aggregate);
+
+		SingleOutputStreamOperator<OUT, ?> returnStream = transform("reduce", getType(), invokable);
+
 		return returnStream;
 	}
 
-	/**
-	 * Initiates an iterative part of the program that executes multiple times
-	 * and feeds back data streams. The iterative part needs to be closed by
-	 * calling {@link IterativeDataStream#closeWith(DataStream)}. The
-	 * transformation of this IterativeDataStream will be the iteration head.
-	 * The data stream given to the {@code closeWith(DataStream)} method is the
-	 * data stream that will be fed back and used as the input for the iteration
-	 * head. Unlike in batch processing by default the output of the iteration
-	 * stream is directed to both to the iteration head and the next component.
-	 * To direct tuples to the iteration head or the output specifically one can
-	 * use the {@code split(OutputSelector)} on the iteration tail while
-	 * referencing the iteration head as 'iterate'.
-	 * <p>
-	 * The iteration edge will be partitioned the same way as the first input of
-	 * the iteration head.
-	 * <p>
-	 * By default a DataStream with iteration will never terminate, but the user
-	 * can use the {@link IterativeDataStream#setMaxWaitTime} call to set a max
-	 * waiting time for the iteration.
-	 * 
-	 * @return The iterative data stream created.
-	 */
-	public IterativeDataStream<OUT> iterate() {
-		return new IterativeDataStream<OUT>(this);
-	}
+	protected <R> DataStream<OUT> addIterationSource(Integer iterationID, long waitTime) {
 
-	protected <R> DataStream<OUT> addIterationSource(String iterationID, long waitTime) {
-
-		DataStream<R> returnStream = new DataStreamSource<R>(environment, "iterationSource", null);
+		DataStream<R> returnStream = new DataStreamSource<R>(environment, "iterationSource", null, true);
 
 		jobGraphBuilder.addIterationHead(returnStream.getId(), this.getId(), iterationID,
 				degreeOfParallelism, waitTime);
@@ -1189,41 +1014,34 @@ public class DataStream<OUT> {
 	}
 
 	/**
-	 * Internal function for passing the user defined functions to the JobGraph
-	 * of the job.
+	 * Method for passing user defined invokables along with the type
+	 * informations that will transform the DataStream.
 	 * 
-	 * @param functionName
-	 *            name of the function
-	 * @param function
-	 *            the user defined function
-	 * @param functionInvokable
-	 *            the wrapping JobVertex instance
+	 * @param operatorName
+	 *            name of the operator, for logging purposes
+	 * @param outTypeInfo
+	 *            the output type of the operator
+	 * @param invokable
+	 *            the object containing the transformation logic
 	 * @param <R>
 	 *            type of the return stream
 	 * @return the data stream constructed
 	 */
-	protected <R> SingleOutputStreamOperator<R, ?> addFunction(String functionName,
-			final Function function, TypeWrapper<OUT> inTypeWrapper, TypeWrapper<R> outTypeWrapper,
-			StreamInvokable<OUT, R> functionInvokable) {
+	public <R> SingleOutputStreamOperator<R, ?> transform(String operatorName,
+			TypeInformation<R> outTypeInfo, StreamInvokable<OUT, R> invokable) {
 		DataStream<OUT> inputStream = this.copy();
 		@SuppressWarnings({ "unchecked", "rawtypes" })
 		SingleOutputStreamOperator<R, ?> returnStream = new SingleOutputStreamOperator(environment,
-				functionName, outTypeWrapper);
+				operatorName, outTypeInfo);
 
-		try {
-			jobGraphBuilder.addStreamVertex(returnStream.getId(), functionInvokable, inTypeWrapper,
-					outTypeWrapper, functionName,
-					SerializationUtils.serialize((Serializable) function), degreeOfParallelism);
-		} catch (SerializationException e) {
-			throw new RuntimeException("Cannot serialize user defined function");
-		}
+		jobGraphBuilder.addStreamVertex(returnStream.getId(), invokable, getType(), outTypeInfo,
+				operatorName, degreeOfParallelism);
 
 		connectGraph(inputStream, returnStream.getId(), 0);
 
 		if (inputStream instanceof IterativeDataStream) {
 			IterativeDataStream<OUT> iterativeStream = (IterativeDataStream<OUT>) inputStream;
-			returnStream.addIterationSource(iterativeStream.iterationID.toString(),
-					iterativeStream.waitTime);
+			returnStream.addIterationSource(iterativeStream.iterationID, iterativeStream.waitTime);
 		}
 
 		return returnStream;
@@ -1277,30 +1095,84 @@ public class DataStream<OUT> {
 	 * @return The closed DataStream.
 	 */
 	public DataStreamSink<OUT> addSink(SinkFunction<OUT> sinkFunction) {
-		return addSink(this.copy(), sinkFunction);
-	}
 
-	private DataStreamSink<OUT> addSink(DataStream<OUT> inputStream, SinkFunction<OUT> sinkFunction) {
-		return addSink(inputStream, sinkFunction, new FunctionTypeWrapper<OUT>(sinkFunction,
-				SinkFunction.class, 0));
-	}
+		DataStreamSink<OUT> returnStream = new DataStreamSink<OUT>(environment, "sink", getType());
 
-	private DataStreamSink<OUT> addSink(DataStream<OUT> inputStream,
-			SinkFunction<OUT> sinkFunction, TypeWrapper<OUT> inTypeWrapper) {
-		DataStreamSink<OUT> returnStream = new DataStreamSink<OUT>(environment, "sink",
-				outTypeWrapper);
+		jobGraphBuilder.addStreamVertex(returnStream.getId(), new SinkInvokable<OUT>(
+				clean(sinkFunction)), getType(), null, "sink", degreeOfParallelism);
 
-		try {
-			jobGraphBuilder.addStreamVertex(returnStream.getId(), new SinkInvokable<OUT>(
-					sinkFunction), inTypeWrapper, null, "sink", SerializationUtils
-					.serialize(sinkFunction), degreeOfParallelism);
-		} catch (SerializationException e) {
-			throw new RuntimeException("Cannot serialize SinkFunction");
-		}
-
-		inputStream.connectGraph(inputStream.copy(), returnStream.getId(), 0);
+		this.connectGraph(this.copy(), returnStream.getId(), 0);
 
 		return returnStream;
+	}
+
+	/**
+	 * Gets the class of the field at the given position
+	 * 
+	 * @param pos
+	 *            Position of the field
+	 * @return The class of the field
+	 */
+	@SuppressWarnings("rawtypes")
+	protected Class<?> getClassAtPos(int pos) {
+		Class<?> type;
+		TypeInformation<OUT> outTypeInfo = getType();
+		if (outTypeInfo.isTupleType()) {
+			type = ((TupleTypeInfo) outTypeInfo).getTypeAt(pos).getTypeClass();
+
+		} else if (outTypeInfo instanceof BasicArrayTypeInfo) {
+
+			type = ((BasicArrayTypeInfo) outTypeInfo).getComponentTypeClass();
+
+		} else if (outTypeInfo instanceof PrimitiveArrayTypeInfo) {
+			Class<?> clazz = outTypeInfo.getTypeClass();
+			if (clazz == boolean[].class) {
+				type = Boolean.class;
+			} else if (clazz == short[].class) {
+				type = Short.class;
+			} else if (clazz == int[].class) {
+				type = Integer.class;
+			} else if (clazz == long[].class) {
+				type = Long.class;
+			} else if (clazz == float[].class) {
+				type = Float.class;
+			} else if (clazz == double[].class) {
+				type = Double.class;
+			} else if (clazz == char[].class) {
+				type = Character.class;
+			} else {
+				throw new IndexOutOfBoundsException("Type could not be determined for array");
+			}
+
+		} else if (pos == 0) {
+			type = outTypeInfo.getTypeClass();
+		} else {
+			throw new IndexOutOfBoundsException("Position is out of range");
+		}
+		return type;
+	}
+
+	/**
+	 * Checks if the given field position is allowed for the output type
+	 * 
+	 * @param pos
+	 *            Position to check
+	 */
+	protected void checkFieldRange(int pos) {
+		try {
+			getClassAtPos(pos);
+		} catch (IndexOutOfBoundsException e) {
+			throw new RuntimeException("Selected field is out of range");
+
+		}
+	}
+
+	private void validateMerge(String id) {
+		for (DataStream<OUT> ds : this.mergedStreams) {
+			if (ds.getId().equals(id)) {
+				throw new RuntimeException("A DataStream cannot be merged with itself");
+			}
+		}
 	}
 
 	/**

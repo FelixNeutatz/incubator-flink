@@ -18,29 +18,37 @@
 
 package org.apache.flink.client;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-
+import akka.actor.ActorRef;
+import akka.actor.ActorSystem;
+import akka.actor.Props;
+import akka.actor.Status;
+import akka.actor.UntypedActor;
+import akka.testkit.JavaTestKit;
 import org.apache.commons.cli.CommandLine;
-import org.apache.flink.client.CliFrontend;
-import org.apache.flink.runtime.client.JobCancelResult;
-import org.apache.flink.runtime.client.JobProgressResult;
-import org.apache.flink.runtime.client.JobSubmissionResult;
-import org.apache.flink.runtime.event.job.AbstractEvent;
-import org.apache.flink.runtime.event.job.RecentJobEvent;
-import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobgraph.JobID;
-import org.apache.flink.runtime.protocols.ExtendedManagementProtocol;
-import org.apache.flink.runtime.types.IntegerRecord;
-import org.junit.Assert;
+import org.apache.flink.runtime.messages.JobManagerMessages;
+import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 public class CliFrontendListCancelTest {
+
+	private static ActorSystem actorSystem;
+
+	@BeforeClass
+	public static void setup(){
+		actorSystem = ActorSystem.create("TestingActorSystem");
+	}
+
+	@AfterClass
+	public static void teardown(){
+		JavaTestKit.shutdownActorSystem(actorSystem);
+		actorSystem = null;
+	}
 	
 	@BeforeClass
 	public static void init() {
@@ -71,9 +79,11 @@ public class CliFrontendListCancelTest {
 			{
 				JobID jid = new JobID();
 				String jidString = jid.toString();
+
+				final ActorRef jm = actorSystem.actorOf(Props.create(CliJobManager.class, jid));
 				
 				String[] parameters = {"-i", jidString};
-				InfoListTestCliFrontend testFrontend = new InfoListTestCliFrontend(new TestProtocol(jid));
+				InfoListTestCliFrontend testFrontend = new InfoListTestCliFrontend(jm);
 				int retCode = testFrontend.cancel(parameters);
 				assertTrue(retCode == 0);
 			}
@@ -89,6 +99,8 @@ public class CliFrontendListCancelTest {
 	@Test
 	public void testList() {
 		try {
+			final ActorRef jm = actorSystem.actorOf(Props.create(CliJobManager.class, (Object)null));
+
 			// test unrecognized option
 			{
 				String[] parameters = {"-v", "-k"};
@@ -108,7 +120,7 @@ public class CliFrontendListCancelTest {
 			// test list properly
 			{
 				String[] parameters = {"-r", "-s"};
-				InfoListTestCliFrontend testFrontend = new InfoListTestCliFrontend(new TestProtocol());
+				InfoListTestCliFrontend testFrontend = new InfoListTestCliFrontend(jm);
 				int retCode = testFrontend.list(parameters);
 				assertTrue(retCode == 0);
 			}
@@ -119,82 +131,40 @@ public class CliFrontendListCancelTest {
 			fail("Program caused an exception: " + e.getMessage());
 		}
 	}
-	
-	
+
+
 	protected static final class InfoListTestCliFrontend extends CliFrontendTestUtils.TestingCliFrontend {
-		
-		private final ExtendedManagementProtocol protocol;
-		
-		public InfoListTestCliFrontend(ExtendedManagementProtocol protocol) {
-			this.protocol = protocol;
+		private ActorRef jobmanager;
+
+		public InfoListTestCliFrontend(ActorRef jobmanager){
+			this.jobmanager = jobmanager;
 		}
 
 		@Override
-		protected ExtendedManagementProtocol getJobManagerConnection(CommandLine line) {
-			return this.protocol;
+		public ActorRef getJobManager(CommandLine line){
+			return jobmanager;
 		}
 	}
 
-	protected static final class TestProtocol implements ExtendedManagementProtocol {
-		
-		private final JobID expectedCancelId;
-		
-		public TestProtocol() {
-			this.expectedCancelId = null;
-		}
-		
-		public TestProtocol(JobID expectedCancelId) {
-			this.expectedCancelId = expectedCancelId;
+	protected static final class CliJobManager extends UntypedActor{
+		private final JobID jobID;
+
+		public CliJobManager(final JobID jobID){
+			this.jobID = jobID;
 		}
 
 		@Override
-		public JobSubmissionResult submitJob(JobGraph job) throws IOException {
-			throw new UnsupportedOperationException();
-		}
-
-		@Override
-		public JobProgressResult getJobProgress(JobID jobID) throws IOException {
-			throw new UnsupportedOperationException();
-		}
-
-		@Override
-		public JobCancelResult cancelJob(JobID jobID) throws IOException {
-			if (this.expectedCancelId == null) {
-				throw new UnsupportedOperationException();
-			} else {
-				Assert.assertEquals(expectedCancelId, jobID);
-				return null;
+		public void onReceive(Object message) throws Exception {
+			if(message instanceof JobManagerMessages.RequestTotalNumberOfSlots$){
+				getSender().tell(1, getSelf());
+			}else if(message instanceof JobManagerMessages.CancelJob){
+				JobManagerMessages.CancelJob cancelJob = (JobManagerMessages.CancelJob) message;
+				assertEquals(jobID, cancelJob.jobID());
+				getSender().tell(new Status.Success(new Object()), getSelf());
+			}else if(message instanceof  JobManagerMessages.RequestRunningJobs$){
+				getSender().tell(new JobManagerMessages.RunningJobs(),
+						getSelf());
 			}
-		}
-
-		@Override
-		public IntegerRecord getRecommendedPollingInterval() throws IOException {
-			throw new UnsupportedOperationException();
-		}
-
-		@Override
-		public List<RecentJobEvent> getRecentJobs() throws IOException {
-			return new ArrayList<RecentJobEvent>();
-		}
-
-		@Override
-		public List<AbstractEvent> getEvents(JobID jobID) throws IOException {
-			throw new UnsupportedOperationException();
-		}
-
-		@Override
-		public int getTotalNumberOfRegisteredSlots() {
-			return 1;
-		}
-
-		@Override
-		public int getNumberOfSlotsAvailableToScheduler() throws IOException {
-			return 1;
-		}
-
-		@Override
-		public int getBlobServerPort() {
-			throw new UnsupportedOperationException();
 		}
 	}
 }

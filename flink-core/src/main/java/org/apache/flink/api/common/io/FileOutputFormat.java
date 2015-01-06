@@ -1,20 +1,20 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+* Licensed to the Apache Software Foundation (ASF) under one
+* or more contributor license agreements.  See the NOTICE file
+* distributed with this work for additional information
+* regarding copyright ownership.  The ASF licenses this file
+* to you under the Apache License, Version 2.0 (the
+* "License"); you may not use this file except in compliance
+* with the License.  You may obtain a copy of the License at
+*
+*     http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*/
 
 package org.apache.flink.api.common.io;
 
@@ -62,20 +62,22 @@ public abstract class FileOutputFormat<IT> implements OutputFormat<IT>, Initiali
 	private static OutputDirectoryMode DEFAULT_OUTPUT_DIRECTORY_MODE;
 	
 	
-	private static final void initDefaultsFromConfiguration() {
-		final boolean overwrite = GlobalConfiguration.getBoolean(ConfigConstants.FILESYSTEM_DEFAULT_OVERWRITE_KEY,
-			ConfigConstants.DEFAULT_FILESYSTEM_OVERWRITE);
+	private static final void initDefaultsFromConfiguration(Configuration configuration) {
+		final boolean overwrite = configuration.getBoolean(ConfigConstants
+						.FILESYSTEM_DEFAULT_OVERWRITE_KEY,
+				ConfigConstants.DEFAULT_FILESYSTEM_OVERWRITE);
 	
 		DEFAULT_WRITE_MODE = overwrite ? WriteMode.OVERWRITE : WriteMode.NO_OVERWRITE;
 		
-		final boolean alwaysCreateDirectory = GlobalConfiguration.getBoolean(ConfigConstants.FILESYSTEM_OUTPUT_ALWAYS_CREATE_DIRECTORY_KEY,
+		final boolean alwaysCreateDirectory = configuration.getBoolean(ConfigConstants
+						.FILESYSTEM_OUTPUT_ALWAYS_CREATE_DIRECTORY_KEY,
 			ConfigConstants.DEFAULT_FILESYSTEM_ALWAYS_CREATE_DIRECTORY);
 	
 		DEFAULT_OUTPUT_DIRECTORY_MODE = alwaysCreateDirectory ? OutputDirectoryMode.ALWAYS : OutputDirectoryMode.PARONLY;
 	}
 	
 	static {
-		initDefaultsFromConfiguration();
+		initDefaultsFromConfiguration(GlobalConfiguration.getConfiguration());
 	}
 	
 	// --------------------------------------------------------------------------------------------	

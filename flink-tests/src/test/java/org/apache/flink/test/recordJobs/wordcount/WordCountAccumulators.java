@@ -16,13 +16,13 @@
  * limitations under the License.
  */
 
-
 package org.apache.flink.test.recordJobs.wordcount;
 
 import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.io.Serializable;
 import java.util.Iterator;
-import java.util.Set;
 import java.util.StringTokenizer;
 
 import org.apache.flink.api.common.JobExecutionResult;
@@ -44,8 +44,8 @@ import org.apache.flink.api.java.record.operators.ReduceOperator;
 import org.apache.flink.api.java.record.operators.ReduceOperator.Combinable;
 import org.apache.flink.client.LocalExecutor;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.memory.DataInputView;
-import org.apache.flink.core.memory.DataOutputView;
+import org.apache.flink.core.memory.InputViewObjectInputStreamWrapper;
+import org.apache.flink.core.memory.OutputViewObjectOutputStreamWrapper;
 import org.apache.flink.runtime.util.SerializableHashSet;
 import org.apache.flink.types.IntValue;
 import org.apache.flink.types.Record;
@@ -57,6 +57,7 @@ import org.apache.flink.util.Collector;
  * This is similar to the WordCount example and additionally demonstrates how to
  * use custom accumulators (built-in or custom).
  */
+@SuppressWarnings("deprecation")
 public class WordCountAccumulators implements Program, ProgramDescription {
 	
 	private static final long serialVersionUID = 1L;
@@ -87,7 +88,6 @@ public class WordCountAccumulators implements Program, ProgramDescription {
 			// You could also write to accumulators in open() or close()
 		}
 
-		
 		@Override
 		public void map(Record record, Collector<Record> collector) {
 			
@@ -193,7 +193,7 @@ public class WordCountAccumulators implements Program, ProgramDescription {
 	/**
 	 * Custom accumulator
 	 */
-	public static class SetAccumulator<T extends Value> implements Accumulator<T, Set<T>> {
+	public static class SetAccumulator<T extends Value> implements Accumulator<T, SerializableHashSet<T>> {
 
 		private static final long serialVersionUID = 1L;
 
@@ -205,7 +205,7 @@ public class WordCountAccumulators implements Program, ProgramDescription {
 		}
 
 		@Override
-		public Set<T> getLocalValue() {
+		public SerializableHashSet<T> getLocalValue() {
 			return this.set;
 		}
 
@@ -215,19 +215,28 @@ public class WordCountAccumulators implements Program, ProgramDescription {
 		}
 
 		@Override
-		public void merge(Accumulator<T, Set<T>> other) {
+		public void merge(Accumulator<T, SerializableHashSet<T>> other) {
 			// build union
 			this.set.addAll(((SetAccumulator<T>) other).getLocalValue());
 		}
 
 		@Override
-		public void write(DataOutputView out) throws IOException {
-			this.set.write(out);
+		public void write(ObjectOutputStream out) throws IOException {
+			this.set.write(new OutputViewObjectOutputStreamWrapper(out));
 		}
 
 		@Override
-		public void read(DataInputView in) throws IOException {
-			this.set.read(in);
+		public void read(ObjectInputStream in) throws IOException {
+			this.set.read(new InputViewObjectInputStreamWrapper(in));
+		}
+
+		@Override
+		public Accumulator<T, SerializableHashSet<T>> clone() {
+			SetAccumulator<T> result = new SetAccumulator<T>();
+
+			result.set.addAll(set);
+
+			return result;
 		}
 	}
 }

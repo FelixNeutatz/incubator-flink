@@ -17,34 +17,30 @@
 
 package org.apache.flink.streaming.api.invokable.operator;
 
+import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.tuple.Tuple;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.invokable.StreamInvokable;
-import org.apache.flink.streaming.util.serialization.TypeWrapper;
 
 public class ProjectInvokable<IN, OUT extends Tuple> extends StreamInvokable<IN, OUT> {
 	private static final long serialVersionUID = 1L;
 
 	transient OUT outTuple;
-	TypeWrapper<OUT> outTypeWrapper;
+	TypeSerializer<OUT> outTypeSerializer;
 	int[] fields;
 	int numFields;
 
-	public ProjectInvokable(int[] fields, TypeWrapper<OUT> outTypeWrapper) {
+	public ProjectInvokable(int[] fields, TypeInformation<OUT> outTypeInformation) {
 		super(null);
 		this.fields = fields;
 		this.numFields = this.fields.length;
-		this.outTypeWrapper = outTypeWrapper;
+		this.outTypeSerializer = outTypeInformation.createSerializer();
 	}
 
 	@Override
-	protected void immutableInvoke() throws Exception {
-		mutableInvoke();
-	}
-
-	@Override
-	protected void mutableInvoke() throws Exception {
-		while ((reuse = recordIterator.next(reuse)) != null) {
+	public void invoke() throws Exception {
+		while (readNext() != null) {
 			callUserFunctionAndLogException();
 		}
 	}
@@ -52,7 +48,7 @@ public class ProjectInvokable<IN, OUT extends Tuple> extends StreamInvokable<IN,
 	@Override
 	protected void callUserFunction() throws Exception {
 		for (int i = 0; i < this.numFields; i++) {
-			outTuple.setField(reuse.getField(fields[i]), i);
+			outTuple.setField(nextRecord.getField(fields[i]), i);
 		}
 		collector.collect(outTuple);
 	}
@@ -60,6 +56,6 @@ public class ProjectInvokable<IN, OUT extends Tuple> extends StreamInvokable<IN,
 	@Override
 	public void open(Configuration config) throws Exception {
 		super.open(config);
-		outTuple = outTypeWrapper.getTypeInfo().createSerializer().createInstance();
+		outTuple = outTypeSerializer.createInstance();
 	}
 }

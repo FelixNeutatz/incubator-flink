@@ -32,6 +32,7 @@ import java.util.Set;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import akka.actor.ActorRef;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.core.io.IOReadableWritable;
@@ -55,7 +56,6 @@ import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.jobgraph.tasks.AbstractInvokable;
 import org.apache.flink.runtime.jobgraph.tasks.InputSplitProvider;
 import org.apache.flink.runtime.memorymanager.MemoryManager;
-import org.apache.flink.runtime.protocols.AccumulatorProtocol;
 import org.apache.flink.runtime.taskmanager.Task;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -119,9 +119,9 @@ public class RuntimeEnvironment implements Environment, BufferProvider, LocalBuf
 	private Thread executingThread;
 
 	/**
-	 * The RPC proxy to report accumulators to JobManager
+	 * The ActorRef to the accumulator
 	 */
-	private final AccumulatorProtocol accumulatorProtocolProxy;
+	private final ActorRef accumulator;
 
 	private final Map<String,FutureTask<Path>> cacheCopyTasks = new HashMap<String, FutureTask<Path>>();
 	
@@ -136,7 +136,7 @@ public class RuntimeEnvironment implements Environment, BufferProvider, LocalBuf
 							ClassLoader userCodeClassLoader,
 							MemoryManager memoryManager, IOManager ioManager,
 							InputSplitProvider inputSplitProvider,
-							AccumulatorProtocol accumulatorProtocolProxy,
+							ActorRef accumulator,
 							BroadcastVariableManager bcVarManager)
 		throws Exception
 	{
@@ -144,16 +144,16 @@ public class RuntimeEnvironment implements Environment, BufferProvider, LocalBuf
 		Preconditions.checkNotNull(memoryManager);
 		Preconditions.checkNotNull(ioManager);
 		Preconditions.checkNotNull(inputSplitProvider);
-		Preconditions.checkNotNull(accumulatorProtocolProxy);
+		Preconditions.checkNotNull(accumulator);
 		Preconditions.checkNotNull(userCodeClassLoader);
 		Preconditions.checkNotNull(bcVarManager);
-		
+
 		this.owner = owner;
 
 		this.memoryManager = memoryManager;
 		this.ioManager = ioManager;
 		this.inputSplitProvider = inputSplitProvider;
-		this.accumulatorProtocolProxy = accumulatorProtocolProxy;
+		this.accumulator = accumulator;
 		this.bcVarManager = bcVarManager;
 
 		// load and instantiate the invokable class
@@ -177,7 +177,19 @@ public class RuntimeEnvironment implements Environment, BufferProvider, LocalBuf
 		this.taskConfiguration = tdd.getTaskConfiguration();
 		
 		this.invokable.setEnvironment(this);
-		this.invokable.registerInputOutput();
+		
+		// make sure that user classloader is available, because registerInputOutput might call usercode
+		{
+			Thread currentThread = Thread.currentThread();
+			ClassLoader context = currentThread.getContextClassLoader();
+			currentThread.setContextClassLoader(userCodeClassLoader);
+			try {
+				this.invokable.registerInputOutput();
+			}
+			finally {
+				currentThread.setContextClassLoader(context);
+			}
+		}
 
 		List<GateDeploymentDescriptor> inGates = tdd.getInputGates();
 		List<GateDeploymentDescriptor> outGates = tdd.getOutputGates();
@@ -642,7 +654,6 @@ public class RuntimeEnvironment implements Environment, BufferProvider, LocalBuf
 		return Collections.unmodifiableSet(outputChannelIDs);
 	}
 
-
 	@Override
 	public Set<ChannelID> getInputChannelIDsOfGate(final GateID gateID) {
 		InputGate<? extends IOReadableWritable> inputGate = null;
@@ -677,8 +688,8 @@ public class RuntimeEnvironment implements Environment, BufferProvider, LocalBuf
 	}
 
 	@Override
-	public AccumulatorProtocol getAccumulatorProtocolProxy() {
-		return accumulatorProtocolProxy;
+	public ActorRef getAccumulator() {
+		return accumulator;
 	}
 
 	@Override

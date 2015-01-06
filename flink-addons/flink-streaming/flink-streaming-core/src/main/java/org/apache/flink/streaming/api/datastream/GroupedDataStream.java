@@ -23,14 +23,13 @@ import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.streaming.api.function.aggregation.AggregationFunction;
 import org.apache.flink.streaming.api.invokable.operator.GroupedReduceInvokable;
 import org.apache.flink.streaming.partitioner.StreamPartitioner;
-import org.apache.flink.streaming.util.serialization.FunctionTypeWrapper;
 
 /**
  * A GroupedDataStream represents a {@link DataStream} which has been
  * partitioned by the given {@link KeySelector}. Operators like {@link #reduce},
  * {@link #batchReduce} etc. can be applied on the {@link GroupedDataStream} to
  * get additional functionality by the grouping.
- *
+ * 
  * @param <OUT>
  *            The output type of the {@link GroupedDataStream}.
  */
@@ -48,6 +47,10 @@ public class GroupedDataStream<OUT> extends DataStream<OUT> {
 		this.keySelector = dataStream.keySelector;
 	}
 
+	public KeySelector<OUT, ?> getKeySelector() {
+		return this.keySelector;
+	}
+
 	/**
 	 * Applies a reduce transformation on the grouped data stream grouped on by
 	 * the given key position. The {@link ReduceFunction} will receive input
@@ -61,10 +64,10 @@ public class GroupedDataStream<OUT> extends DataStream<OUT> {
 	 *            element of the input values with the same key.
 	 * @return The transformed DataStream.
 	 */
+	@Override
 	public SingleOutputStreamOperator<OUT, ?> reduce(ReduceFunction<OUT> reducer) {
-		return addFunction("groupReduce", reducer, new FunctionTypeWrapper<OUT>(reducer,
-				ReduceFunction.class, 0), new FunctionTypeWrapper<OUT>(reducer,
-				ReduceFunction.class, 0), new GroupedReduceInvokable<OUT>(reducer, keySelector));
+		return transform("groupReduce", getType(), new GroupedReduceInvokable<OUT>(clean(reducer),
+				keySelector));
 	}
 
 	/**
@@ -180,11 +183,11 @@ public class GroupedDataStream<OUT> extends DataStream<OUT> {
 	@Override
 	protected SingleOutputStreamOperator<OUT, ?> aggregate(AggregationFunction<OUT> aggregate) {
 
-		GroupedReduceInvokable<OUT> invokable = new GroupedReduceInvokable<OUT>(aggregate,
+		GroupedReduceInvokable<OUT> invokable = new GroupedReduceInvokable<OUT>(clean(aggregate),
 				keySelector);
 
-		SingleOutputStreamOperator<OUT, ?> returnStream = addFunction("groupReduce", aggregate,
-				outTypeWrapper, outTypeWrapper, invokable);
+		SingleOutputStreamOperator<OUT, ?> returnStream = transform("groupReduce", getType(),
+				invokable);
 
 		return returnStream;
 	}

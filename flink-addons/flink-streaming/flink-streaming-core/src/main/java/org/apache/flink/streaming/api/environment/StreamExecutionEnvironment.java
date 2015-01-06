@@ -20,10 +20,19 @@ package org.apache.flink.streaming.api.environment;
 import java.io.File;
 import java.io.Serializable;
 import java.util.Collection;
+import java.util.List;
 
-import org.apache.commons.lang3.SerializationException;
-import org.apache.commons.lang3.SerializationUtils;
+import org.apache.commons.lang3.Validate;
+import org.apache.flink.api.common.ExecutionConfig;
+import org.apache.flink.api.common.io.InputFormat;
+import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.ExecutionEnvironment;
+import org.apache.flink.api.java.io.TextInputFormat;
+import org.apache.flink.api.java.typeutils.TypeExtractor;
+import org.apache.flink.client.program.Client;
+import org.apache.flink.client.program.ContextEnvironment;
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.streaming.api.JobGraphBuilder;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
@@ -31,11 +40,12 @@ import org.apache.flink.streaming.api.function.source.FileSourceFunction;
 import org.apache.flink.streaming.api.function.source.FileStreamFunction;
 import org.apache.flink.streaming.api.function.source.FromElementsFunction;
 import org.apache.flink.streaming.api.function.source.GenSequenceFunction;
+import org.apache.flink.streaming.api.function.source.GenericSourceFunction;
+import org.apache.flink.streaming.api.function.source.ParallelSourceFunction;
+import org.apache.flink.streaming.api.function.source.RichParallelSourceFunction;
+import org.apache.flink.streaming.api.function.source.SocketTextStreamFunction;
 import org.apache.flink.streaming.api.function.source.SourceFunction;
 import org.apache.flink.streaming.api.invokable.SourceInvokable;
-import org.apache.flink.streaming.util.serialization.FunctionTypeWrapper;
-import org.apache.flink.streaming.util.serialization.ObjectTypeWrapper;
-import org.apache.flink.streaming.util.serialization.TypeWrapper;
 
 /**
  * {@link ExecutionEnvironment} for streaming jobs. An instance of it is
@@ -44,22 +54,11 @@ import org.apache.flink.streaming.util.serialization.TypeWrapper;
  */
 public abstract class StreamExecutionEnvironment {
 
-	/**
-	 * The environment of the context (local by default, cluster if invoked
-	 * through command line)
-	 */
-	private static StreamExecutionEnvironment contextEnvironment;
-
-	/** flag to disable local executor when using the ContextEnvironment */
-	private static boolean allowLocalExecution = true;
-
 	private static int defaultLocalDop = Runtime.getRuntime().availableProcessors();
 
-	private int degreeOfParallelism = 1;
-
-	private int executionParallelism = -1;
-
 	private long bufferTimeout = 100;
+
+	private ExecutionConfig config = new ExecutionConfig();
 
 	protected JobGraphBuilder jobGraphBuilder;
 
@@ -74,20 +73,31 @@ public abstract class StreamExecutionEnvironment {
 		jobGraphBuilder = new JobGraphBuilder();
 	}
 
-	public int getExecutionParallelism() {
-		return executionParallelism == -1 ? degreeOfParallelism : executionParallelism;
+	/**
+	 * Sets the config object.
+	 */
+	public void setConfig(ExecutionConfig config) {
+		Validate.notNull(config);
+		this.config = config;
+	}
+
+	/**
+	 * Gets the config object.
+	 */
+	public ExecutionConfig getConfig() {
+		return config;
 	}
 
 	/**
 	 * Gets the degree of parallelism with which operation are executed by
 	 * default. Operations can individually override this value to use a
-	 * specific degree of parallelism via {@link DataStream#setParallelism}.
+	 * specific degree of parallelism.
 	 * 
 	 * @return The degree of parallelism used by operations, unless they
 	 *         override that value.
 	 */
 	public int getDegreeOfParallelism() {
-		return this.degreeOfParallelism;
+		return config.getDegreeOfParallelism();
 	}
 
 	/**
@@ -103,11 +113,11 @@ public abstract class StreamExecutionEnvironment {
 	 * @param degreeOfParallelism
 	 *            The degree of parallelism
 	 */
-	protected StreamExecutionEnvironment setDegreeOfParallelism(int degreeOfParallelism) {
+	public StreamExecutionEnvironment setDegreeOfParallelism(int degreeOfParallelism) {
 		if (degreeOfParallelism < 1) {
 			throw new IllegalArgumentException("Degree of parallelism must be at least one.");
 		}
-		this.degreeOfParallelism = degreeOfParallelism;
+		config.setDegreeOfParallelism(degreeOfParallelism);
 		return this;
 	}
 
@@ -123,14 +133,15 @@ public abstract class StreamExecutionEnvironment {
 	 * <li>
 	 * 0 triggers flushing after every record thus minimizing latency</li>
 	 * <li>
-	 * -1 triggers flushing only when the output buffer is full thus maximizing throughput</li>
+	 * -1 triggers flushing only when the output buffer is full thus maximizing
+	 * throughput</li>
 	 * </ul>
 	 * 
 	 * @param timeoutMillis
 	 *            The maximum time between two output flushes.
 	 */
 	public StreamExecutionEnvironment setBufferTimeout(long timeoutMillis) {
-		if (timeoutMillis < -1 ) {
+		if (timeoutMillis < -1) {
 			throw new IllegalArgumentException("Timeout of buffer must be non-negative or -1");
 		}
 
@@ -138,23 +149,27 @@ public abstract class StreamExecutionEnvironment {
 		return this;
 	}
 
+	/**
+	 * Sets the maximum time frequency (milliseconds) for the flushing of the
+	 * output buffers. For clarification on the extremal values see
+	 * {@link #setBufferTimeout(long)}.
+	 * 
+	 * @return The timeout of the buffer.
+	 */
 	public long getBufferTimeout() {
 		return this.bufferTimeout;
 	}
 
 	/**
-	 * Sets the number of hardware contexts (CPU cores / threads) used when
-	 * executed in {@link LocalStreamEnvironment}.
+	 * Sets the default parallelism that will be used for the local execution
+	 * environment created by {@link #createLocalEnvironment()}.
 	 * 
 	 * @param degreeOfParallelism
-	 *            The degree of parallelism in local environment
+	 *            The degree of parallelism to use as the default local
+	 *            parallelism.
 	 */
-	public void setExecutionParallelism(int degreeOfParallelism) {
-		if (degreeOfParallelism < 1) {
-			throw new IllegalArgumentException("Degree of parallelism must be at least one.");
-		}
-
-		this.executionParallelism = degreeOfParallelism;
+	public static void setDefaultLocalParallelism(int degreeOfParallelism) {
+		defaultLocalDop = degreeOfParallelism;
 	}
 
 	// --------------------------------------------------------------------------------------------
@@ -172,19 +187,36 @@ public abstract class StreamExecutionEnvironment {
 	 * @return The DataStream representing the text file.
 	 */
 	public DataStreamSource<String> readTextFile(String filePath) {
-		checkIfFileExists(filePath);
-		return addSource(new FileSourceFunction(filePath), 1);
+		Validate.notNull(filePath, "The file path may not be null.");
+		TextInputFormat format = new TextInputFormat(new Path(filePath));
+		TypeInformation<String> typeInfo = BasicTypeInfo.STRING_TYPE_INFO;
+
+		return addFileSource(format, typeInfo);
 	}
 
-	public DataStreamSource<String> readTextFile(String filePath, int parallelism) {
-		checkIfFileExists(filePath);
-		return addSource(new FileSourceFunction(filePath), parallelism);
+	/**
+	 * Creates a DataStream that represents the Strings produced by reading the
+	 * given file line wise. The file will be read with the given character set.
+	 * 
+	 * @param filePath
+	 *            The path of the file, as a URI (e.g.,
+	 *            "file:///some/local/file" or "hdfs://host:port/file/path").
+	 * @return The DataStream representing the text file.
+	 */
+	public DataStreamSource<String> readTextFile(String filePath, String charsetName) {
+		Validate.notNull(filePath, "The file path may not be null.");
+		TextInputFormat format = new TextInputFormat(new Path(filePath));
+		TypeInformation<String> typeInfo = BasicTypeInfo.STRING_TYPE_INFO;
+		format.setCharsetName(charsetName);
+
+		return addFileSource(format, typeInfo);
 	}
 
 	/**
 	 * Creates a DataStream that represents the Strings produced by reading the
 	 * given file line wise multiple times(infinite). The file will be read with
-	 * the system's default character set.
+	 * the system's default character set. This functionality can be used for
+	 * testing a topology.
 	 * 
 	 * @param filePath
 	 *            The path of the file, as a URI (e.g.,
@@ -193,12 +225,7 @@ public abstract class StreamExecutionEnvironment {
 	 */
 	public DataStreamSource<String> readTextStream(String filePath) {
 		checkIfFileExists(filePath);
-		return addSource(new FileStreamFunction(filePath), 1);
-	}
-
-	public DataStreamSource<String> readTextStream(String filePath, int parallelism) {
-		checkIfFileExists(filePath);
-		return addSource(new FileStreamFunction(filePath), parallelism);
+		return addSource(new FileStreamFunction(filePath), null, "textStream");
 	}
 
 	private static void checkIfFileExists(String filePath) {
@@ -235,19 +262,11 @@ public abstract class StreamExecutionEnvironment {
 					"fromElements needs at least one element as argument");
 		}
 
-		TypeWrapper<OUT> outTypeWrapper = new ObjectTypeWrapper<OUT>(data[0]);
-		DataStreamSource<OUT> returnStream = new DataStreamSource<OUT>(this, "elements",
-				outTypeWrapper);
+		TypeInformation<OUT> outTypeInfo = TypeExtractor.getForObject(data[0]);
 
-		try {
-			SourceFunction<OUT> function = new FromElementsFunction<OUT>(data);
-			jobGraphBuilder.addStreamVertex(returnStream.getId(),
-					new SourceInvokable<OUT>(function), null, outTypeWrapper, "source",
-					SerializationUtils.serialize(function), 1);
-		} catch (SerializationException e) {
-			throw new RuntimeException("Cannot serialize elements");
-		}
-		return returnStream;
+		SourceFunction<OUT> function = new FromElementsFunction<OUT>(data);
+
+		return addSource(function, outTypeInfo, "elements");
 	}
 
 	/**
@@ -271,21 +290,45 @@ public abstract class StreamExecutionEnvironment {
 			throw new IllegalArgumentException("Collection must not be empty");
 		}
 
-		TypeWrapper<OUT> outTypeWrapper = new ObjectTypeWrapper<OUT>(data.iterator().next());
-		DataStreamSource<OUT> returnStream = new DataStreamSource<OUT>(this, "elements",
-				outTypeWrapper);
+		TypeInformation<OUT> outTypeInfo = TypeExtractor.getForObject(data.iterator().next());
+		SourceFunction<OUT> function = new FromElementsFunction<OUT>(data);
 
-		try {
-			SourceFunction<OUT> function = new FromElementsFunction<OUT>(data);
+		return addSource(function, outTypeInfo, "collection");
+	}
 
-			jobGraphBuilder.addStreamVertex(returnStream.getId(), new SourceInvokable<OUT>(
-					new FromElementsFunction<OUT>(data)), null, new ObjectTypeWrapper<OUT>(data
-					.iterator().next()), "source", SerializationUtils.serialize(function), 1);
-		} catch (SerializationException e) {
-			throw new RuntimeException("Cannot serialize collection");
-		}
+	/**
+	 * Creates a new DataStream that contains the strings received infinitely
+	 * from socket. Received strings are decoded by the system's default
+	 * character set.
+	 * 
+	 * @param hostname
+	 *            The host name which a server socket bind.
+	 * @param port
+	 *            The port number which a server socket bind. A port number of 0
+	 *            means that the port number is automatically allocated.
+	 * @param delimiter
+	 *            A character which split received strings into records.
+	 * @return A DataStream, containing the strings received from socket.
+	 */
+	public DataStreamSource<String> socketTextStream(String hostname, int port, char delimiter) {
+		return addSource(new SocketTextStreamFunction(hostname, port, delimiter), null,
+				"socketStrean");
+	}
 
-		return returnStream;
+	/**
+	 * Creates a new DataStream that contains the strings received infinitely
+	 * from socket. Received strings are decoded by the system's default
+	 * character set, uses '\n' as delimiter.
+	 * 
+	 * @param hostname
+	 *            The host name which a server socket bind.
+	 * @param port
+	 *            The port number which a server socket bind. A port number of 0
+	 *            means that the port number is automatically allocated.
+	 * @return A DataStream, containing the strings received from socket.
+	 */
+	public DataStreamSource<String> socketTextStream(String hostname, int port) {
+		return socketTextStream(hostname, port, '\n');
 	}
 
 	/**
@@ -301,39 +344,100 @@ public abstract class StreamExecutionEnvironment {
 		if (from > to) {
 			throw new IllegalArgumentException("Start of sequence must not be greater than the end");
 		}
-		return addSource(new GenSequenceFunction(from, to), 1);
+		return addSource(new GenSequenceFunction(from, to), null, "sequence");
+	}
+
+	private DataStreamSource<String> addFileSource(InputFormat<String, ?> inputFormat,
+			TypeInformation<String> typeInfo) {
+		FileSourceFunction function = new FileSourceFunction(inputFormat, typeInfo);
+		DataStreamSource<String> returnStream = addSource(function, null, "fileSource");
+		jobGraphBuilder.setInputFormat(returnStream.getId(), inputFormat);
+		return returnStream;
 	}
 
 	/**
-	 * Ads a data source thus opening a {@link DataStream}.
+	 * Create a DataStream using a user defined source function for arbitrary
+	 * source functionality.</p> By default sources have a parallelism of 1. To
+	 * enable parallel execution, the user defined source should implement
+	 * {@link ParallelSourceFunction} or extend
+	 * {@link RichParallelSourceFunction}. In these cases the resulting source
+	 * will have the parallelism of the environment. To change this afterwards
+	 * call {@link DataStreamSource#setParallelism(int)}
+	 * 
 	 * 
 	 * @param function
 	 *            the user defined function
-	 * @param parallelism
-	 *            number of parallel instances of the function
 	 * @param <OUT>
 	 *            type of the returned stream
 	 * @return the data stream constructed
 	 */
-	public <OUT> DataStreamSource<OUT> addSource(SourceFunction<OUT> function, int parallelism) {
-		TypeWrapper<OUT> outTypeWrapper = new FunctionTypeWrapper<OUT>(function,
-				SourceFunction.class, 0);
-		DataStreamSource<OUT> returnStream = new DataStreamSource<OUT>(this, "source",
-				outTypeWrapper);
-
-		try {
-			jobGraphBuilder.addStreamVertex(returnStream.getId(),
-					new SourceInvokable<OUT>(function), null, outTypeWrapper, "source",
-					SerializationUtils.serialize(function), parallelism);
-		} catch (SerializationException e) {
-			throw new RuntimeException("Cannot serialize SourceFunction");
-		}
-
-		return returnStream;
+	public <OUT> DataStreamSource<OUT> addSource(SourceFunction<OUT> function) {
+		return addSource(function, null);
 	}
 
-	public <OUT> DataStreamSource<OUT> addSource(SourceFunction<OUT> sourceFunction) {
-		return addSource(sourceFunction, 1);
+	/**
+	 * Ads a data source with a custom type information thus opening a
+	 * {@link DataStream}. Only in very special cases does the user need to
+	 * support type information. Otherwise use
+	 * {@link #addSource(SourceFunction)} </p> By default sources have a
+	 * parallelism of 1. To enable parallel execution, the user defined source
+	 * should implement {@link ParallelSourceFunction} or extend
+	 * {@link RichParallelSourceFunction}. In these cases the resulting source
+	 * will have the parallelism of the environment. To change this afterwards
+	 * call {@link DataStreamSource#setParallelism(int)}
+	 * 
+	 * @param function
+	 *            the user defined function
+	 * @param outTypeInfo
+	 *            the user defined type information for the stream
+	 * @param <OUT>
+	 *            type of the returned stream
+	 * @return the data stream constructed
+	 */
+	public <OUT> DataStreamSource<OUT> addSource(SourceFunction<OUT> function,
+			TypeInformation<OUT> outTypeInfo) {
+		return addSource(function, outTypeInfo, function.getClass().getName());
+	}
+
+	/**
+	 * Ads a data source with a custom type information thus opening a
+	 * {@link DataStream}. Only in very special cases does the user need to
+	 * support type information. Otherwise use
+	 * {@link #addSource(SourceFunction)}
+	 * 
+	 * @param function
+	 *            the user defined function
+	 * @param outTypeInfo
+	 *            the user defined type information for the stream
+	 * @param sourceName
+	 *            Name of the data source
+	 * @param <OUT>
+	 *            type of the returned stream
+	 * @return the data stream constructed
+	 */
+	@SuppressWarnings("unchecked")
+	private <OUT> DataStreamSource<OUT> addSource(SourceFunction<OUT> function,
+			TypeInformation<OUT> outTypeInfo, String sourceName) {
+
+		if (outTypeInfo == null) {
+			if (function instanceof GenericSourceFunction) {
+				outTypeInfo = ((GenericSourceFunction<OUT>) function).getType();
+			} else {
+				outTypeInfo = TypeExtractor.createTypeInfo(SourceFunction.class,
+						function.getClass(), 0, null, null);
+			}
+		}
+
+		boolean isParallel = function instanceof ParallelSourceFunction;
+		int dop = isParallel ? getDegreeOfParallelism() : 1;
+
+		DataStreamSource<OUT> returnStream = new DataStreamSource<OUT>(this, sourceName,
+				outTypeInfo, isParallel);
+
+		jobGraphBuilder.addStreamVertex(returnStream.getId(), new SourceInvokable<OUT>(function),
+				null, outTypeInfo, sourceName, dop);
+
+		return returnStream;
 	}
 
 	// --------------------------------------------------------------------------------------------
@@ -350,7 +454,19 @@ public abstract class StreamExecutionEnvironment {
 	 *         executed.
 	 */
 	public static StreamExecutionEnvironment getExecutionEnvironment() {
-		return contextEnvironment == null ? createLocalEnvironment() : contextEnvironment;
+		ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
+		if (env instanceof ContextEnvironment) {
+			ContextEnvironment ctx = (ContextEnvironment) env;
+			return createContextEnvironment(ctx.getClient(), ctx.getJars(),
+					ctx.getDegreeOfParallelism());
+		} else {
+			return createLocalEnvironment();
+		}
+	}
+
+	private static StreamExecutionEnvironment createContextEnvironment(Client client,
+			List<File> jars, int dop) {
+		return new StreamContextEnvironment(client, jars, dop);
 	}
 
 	/**
@@ -438,27 +554,6 @@ public abstract class StreamExecutionEnvironment {
 		return rec;
 	}
 
-	// --------------------------------------------------------------------------------------------
-	// Methods to control the context and local environments for execution from
-	// packaged programs
-	// --------------------------------------------------------------------------------------------
-
-	protected static void initializeContextEnvironment(StreamExecutionEnvironment ctx) {
-		contextEnvironment = ctx;
-	}
-
-	protected static boolean isContextEnvironmentSet() {
-		return contextEnvironment != null;
-	}
-
-	protected static void disableLocalExecution() {
-		allowLocalExecution = false;
-	}
-
-	public static boolean localExecutionIsAllowed() {
-		return allowLocalExecution;
-	}
-
 	/**
 	 * Triggers the program execution. The environment will execute all parts of
 	 * the program that have resulted in a "sink" operation. Sink operations are
@@ -488,7 +583,7 @@ public abstract class StreamExecutionEnvironment {
 	/**
 	 * Getter of the {@link JobGraphBuilder} of the streaming job.
 	 * 
-	 * @return jobgraph
+	 * @return jobGraphBuilder
 	 */
 	public JobGraphBuilder getJobGraphBuilder() {
 		return jobGraphBuilder;

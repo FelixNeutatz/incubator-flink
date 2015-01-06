@@ -22,17 +22,18 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
+import akka.actor.ActorRef;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.runtime.execution.ExecutionListener;
 import org.apache.flink.runtime.execution.ExecutionState;
 import org.apache.flink.runtime.execution.RuntimeEnvironment;
 import org.apache.flink.runtime.executiongraph.ExecutionAttemptID;
 import org.apache.flink.runtime.jobgraph.JobID;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.memorymanager.MemoryManager;
+import org.apache.flink.runtime.messages.ExecutionGraphMessages;
 import org.apache.flink.runtime.profiling.TaskManagerProfiler;
 import org.apache.flink.util.ExceptionUtils;
 
@@ -60,9 +61,8 @@ public final class Task {
 	private final String taskName;
 
 	private final TaskManager taskManager;
-	
-	
-	private final List<ExecutionListener> executionListeners = new CopyOnWriteArrayList<ExecutionListener>();
+
+	private final List<ActorRef> executionListenerActors = new CopyOnWriteArrayList<ActorRef>();
 
 	/** The environment (with the invokable) executed by this task */
 	private volatile RuntimeEnvironment environment;
@@ -350,7 +350,7 @@ public final class Task {
 	 *        the configuration attached to the job
 	 */
 	public void registerProfiler(TaskManagerProfiler taskManagerProfiler, Configuration jobConfiguration) {
-		taskManagerProfiler.registerExecutionListener(this, jobConfiguration);
+		taskManagerProfiler.registerTask(this, jobConfiguration);
 	}
 
 	/**
@@ -361,7 +361,7 @@ public final class Task {
 	 */
 	public void unregisterProfiler(TaskManagerProfiler taskManagerProfiler) {
 		if (taskManagerProfiler != null) {
-			taskManagerProfiler.unregisterExecutionListener(this.executionId);
+			taskManagerProfiler.unregisterTask(this.executionId);
 		}
 	}
 	
@@ -369,18 +369,12 @@ public final class Task {
 	//                                     State Listeners
 	// --------------------------------------------------------------------------------------------
 	
-	public void registerExecutionListener(ExecutionListener listener) {
-		if (listener == null) {
-			throw new IllegalArgumentException();
-		}
-		this.executionListeners.add(listener);
+	public void registerExecutionListener(ActorRef listener){
+		executionListenerActors.add(listener);
 	}
 
-	public void unregisterExecutionListener(ExecutionListener listener) {
-		if (listener == null) {
-			throw new IllegalArgumentException();
-		}
-		this.executionListeners.remove(listener);
+	public void unregisterExecutionListener(ActorRef listener){
+		executionListenerActors.remove(listener);
 	}
 	
 	private void notifyObservers(ExecutionState newState, String message) {
@@ -388,13 +382,11 @@ public final class Task {
 			LOG.info(getTaskNameWithSubtasks() + " switched to " + newState + (message == null ? "" : " : " + message));
 		}
 		
-		for (ExecutionListener listener : this.executionListeners) {
-			try {
-				listener.executionStateChanged(jobId, vertexId, subtaskIndex, executionId, newState, message);
-			}
-			catch (Throwable t) {
-				LOG.error("Error while calling execution listener.", t);
-			}
+		for(ActorRef listener: executionListenerActors){
+			listener.tell(new ExecutionGraphMessages.ExecutionStateChanged(
+							jobId, vertexId, taskName, numberOfSubtasks, subtaskIndex,
+							executionId, newState,System.currentTimeMillis(), message),
+					ActorRef.noSender());
 		}
 	}
 	

@@ -17,6 +17,7 @@
 
 package org.apache.flink.streaming.api.datastream;
 
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple;
 import org.apache.flink.api.java.tuple.Tuple1;
 import org.apache.flink.api.java.tuple.Tuple10;
@@ -43,21 +44,20 @@ import org.apache.flink.api.java.tuple.Tuple6;
 import org.apache.flink.api.java.tuple.Tuple7;
 import org.apache.flink.api.java.tuple.Tuple8;
 import org.apache.flink.api.java.tuple.Tuple9;
+import org.apache.flink.api.java.typeutils.TupleTypeInfo;
 import org.apache.flink.streaming.api.invokable.operator.ProjectInvokable;
-import org.apache.flink.streaming.util.serialization.ProjectTypeWrapper;
-import org.apache.flink.streaming.util.serialization.TypeWrapper;
 
 public class StreamProjection<IN> {
 
 	private DataStream<IN> dataStream;
 	private int[] fieldIndexes;
-	private TypeWrapper<IN> inTypeWrapper;
+	private TypeInformation<IN> inTypeInfo;
 
 	protected StreamProjection(DataStream<IN> dataStream, int[] fieldIndexes) {
 		this.dataStream = dataStream;
 		this.fieldIndexes = fieldIndexes;
-		this.inTypeWrapper = dataStream.outTypeWrapper;
-		if (!inTypeWrapper.getTypeInfo().isTupleType()) {
+		this.inTypeInfo = dataStream.getType();
+		if (!inTypeInfo.isTupleType()) {
 			throw new RuntimeException("Only Tuple DataStreams can be projected");
 		}
 	}
@@ -80,12 +80,11 @@ public class StreamProjection<IN> {
 					"Numbers of projected fields and types do not match.");
 		}
 
-		TypeWrapper<Tuple1<T0>> outTypeWrapper = new ProjectTypeWrapper<IN, Tuple1<T0>>(
-				inTypeWrapper, fieldIndexes, types);
-
-		return dataStream.addFunction("projection", null, inTypeWrapper, outTypeWrapper,
-				new ProjectInvokable<IN, Tuple1<T0>>(fieldIndexes, outTypeWrapper));
-
+		@SuppressWarnings("unchecked")
+		TypeInformation<Tuple1<T0>> outType = (TypeInformation<Tuple1<T0>>) extractFieldTypes(
+				fieldIndexes, types, inTypeInfo);
+		return dataStream.transform("projection", outType, new ProjectInvokable<IN, Tuple1<T0>>(
+				fieldIndexes, outType));
 	}
 
 	/**
@@ -109,11 +108,11 @@ public class StreamProjection<IN> {
 					"Numbers of projected fields and types do not match.");
 		}
 
-		TypeWrapper<Tuple2<T0, T1>> outTypeWrapper = new ProjectTypeWrapper<IN, Tuple2<T0, T1>>(
-				inTypeWrapper, fieldIndexes, types);
-
-		return dataStream.addFunction("projection", null, inTypeWrapper, outTypeWrapper,
-				new ProjectInvokable<IN, Tuple2<T0, T1>>(fieldIndexes, outTypeWrapper));
+		@SuppressWarnings("unchecked")
+		TypeInformation<Tuple2<T0, T1>> outType = (TypeInformation<Tuple2<T0, T1>>) extractFieldTypes(
+				fieldIndexes, types, inTypeInfo);
+		return dataStream.transform("projection", outType,
+				new ProjectInvokable<IN, Tuple2<T0, T1>>(fieldIndexes, outType));
 	}
 
 	/**
@@ -139,12 +138,11 @@ public class StreamProjection<IN> {
 					"Numbers of projected fields and types do not match.");
 		}
 
-		TypeWrapper<Tuple3<T0, T1, T2>> outTypeWrapper = new ProjectTypeWrapper<IN, Tuple3<T0, T1, T2>>(
-				inTypeWrapper, fieldIndexes, types);
-
-		return dataStream.addFunction("projection", null, inTypeWrapper, outTypeWrapper,
-				new ProjectInvokable<IN, Tuple3<T0, T1, T2>>(fieldIndexes, outTypeWrapper));
-
+		@SuppressWarnings("unchecked")
+		TypeInformation<Tuple3<T0, T1, T2>> outType = (TypeInformation<Tuple3<T0, T1, T2>>) extractFieldTypes(
+				fieldIndexes, types, inTypeInfo);
+		return dataStream.transform("projection", outType,
+				new ProjectInvokable<IN, Tuple3<T0, T1, T2>>(fieldIndexes, outType));
 	}
 
 	/**
@@ -172,12 +170,11 @@ public class StreamProjection<IN> {
 					"Numbers of projected fields and types do not match.");
 		}
 
-		TypeWrapper<Tuple4<T0, T1, T2, T3>> outTypeWrapper = new ProjectTypeWrapper<IN, Tuple4<T0, T1, T2, T3>>(
-				inTypeWrapper, fieldIndexes, types);
-
-		return dataStream.addFunction("projection", null, inTypeWrapper, outTypeWrapper,
-				new ProjectInvokable<IN, Tuple4<T0, T1, T2, T3>>(fieldIndexes, outTypeWrapper));
-
+		@SuppressWarnings("unchecked")
+		TypeInformation<Tuple4<T0, T1, T2, T3>> outType = (TypeInformation<Tuple4<T0, T1, T2, T3>>) extractFieldTypes(
+				fieldIndexes, types, inTypeInfo);
+		return dataStream.transform("projection", outType,
+				new ProjectInvokable<IN, Tuple4<T0, T1, T2, T3>>(fieldIndexes, outType));
 	}
 
 	/**
@@ -206,19 +203,17 @@ public class StreamProjection<IN> {
 			throw new IllegalArgumentException(
 					"Numbers of projected fields and types do not match.");
 		}
-
-		TypeWrapper<Tuple5<T0, T1, T2, T3, T4>> outTypeWrapper = new ProjectTypeWrapper<IN, Tuple5<T0, T1, T2, T3, T4>>(
-				inTypeWrapper, fieldIndexes, types);
-
-		return dataStream.addFunction("projection", null, inTypeWrapper, outTypeWrapper,
-				new ProjectInvokable<IN, Tuple5<T0, T1, T2, T3, T4>>(fieldIndexes, outTypeWrapper));
-
+		@SuppressWarnings("unchecked")
+		TypeInformation<Tuple5<T0, T1, T2, T3, T4>> outType = (TypeInformation<Tuple5<T0, T1, T2, T3, T4>>) extractFieldTypes(
+				fieldIndexes, types, inTypeInfo);
+		return dataStream.transform("projection", outType,
+				new ProjectInvokable<IN, Tuple5<T0, T1, T2, T3, T4>>(fieldIndexes, outType));
 	}
 
 	/**
 	 * Projects a {@link Tuple} {@link DataStream} to the previously selected
 	 * fields. Requires the classes of the fields of the resulting Tuples.
-	 *
+	 * 
 	 * @param type0
 	 *            The class of field '0' of the result Tuples.
 	 * @param type1
@@ -232,7 +227,7 @@ public class StreamProjection<IN> {
 	 * @param type5
 	 *            The class of field '5' of the result Tuples.
 	 * @return The projected DataStream.
-	 *
+	 * 
 	 * @see Tuple
 	 * @see DataStream
 	 */
@@ -245,18 +240,17 @@ public class StreamProjection<IN> {
 					"Numbers of projected fields and types do not match.");
 		}
 
-		TypeWrapper<Tuple6<T0, T1, T2, T3, T4, T5>> outTypeWrapper = new ProjectTypeWrapper<IN, Tuple6<T0, T1, T2, T3, T4, T5>>(
-				inTypeWrapper, fieldIndexes, types);
-
-		return dataStream.addFunction("projection", null, inTypeWrapper, outTypeWrapper,
-				new ProjectInvokable<IN, Tuple6<T0, T1, T2, T3, T4, T5>>(fieldIndexes,
-						outTypeWrapper));
+		@SuppressWarnings("unchecked")
+		TypeInformation<Tuple6<T0, T1, T2, T3, T4, T5>> outType = (TypeInformation<Tuple6<T0, T1, T2, T3, T4, T5>>) extractFieldTypes(
+				fieldIndexes, types, inTypeInfo);
+		return dataStream.transform("projection", outType,
+				new ProjectInvokable<IN, Tuple6<T0, T1, T2, T3, T4, T5>>(fieldIndexes, outType));
 	}
 
 	/**
 	 * Projects a {@link Tuple} {@link DataStream} to the previously selected
 	 * fields. Requires the classes of the fields of the resulting Tuples.
-	 *
+	 * 
 	 * @param type0
 	 *            The class of field '0' of the result Tuples.
 	 * @param type1
@@ -272,7 +266,7 @@ public class StreamProjection<IN> {
 	 * @param type6
 	 *            The class of field '6' of the result Tuples.
 	 * @return The projected DataStream.
-	 *
+	 * 
 	 * @see Tuple
 	 * @see DataStream
 	 */
@@ -284,18 +278,20 @@ public class StreamProjection<IN> {
 			throw new IllegalArgumentException(
 					"Numbers of projected fields and types do not match.");
 		}
-		TypeWrapper<Tuple7<T0, T1, T2, T3, T4, T5, T6>> outTypeWrapper = new ProjectTypeWrapper<IN, Tuple7<T0, T1, T2, T3, T4, T5, T6>>(
-				inTypeWrapper, fieldIndexes, types);
-		return dataStream.addFunction("projection", null, inTypeWrapper, outTypeWrapper,
-				new ProjectInvokable<IN, Tuple7<T0, T1, T2, T3, T4, T5, T6>>(fieldIndexes,
-						outTypeWrapper));
 
+		@SuppressWarnings("unchecked")
+		TypeInformation<Tuple7<T0, T1, T2, T3, T4, T5, T6>> outType = (TypeInformation<Tuple7<T0, T1, T2, T3, T4, T5, T6>>) extractFieldTypes(
+				fieldIndexes, types, inTypeInfo);
+		return dataStream
+				.transform("projection", outType,
+						new ProjectInvokable<IN, Tuple7<T0, T1, T2, T3, T4, T5, T6>>(fieldIndexes,
+								outType));
 	}
 
 	/**
 	 * Projects a {@link Tuple} {@link DataStream} to the previously selected
 	 * fields. Requires the classes of the fields of the resulting Tuples.
-	 *
+	 * 
 	 * @param type0
 	 *            The class of field '0' of the result Tuples.
 	 * @param type1
@@ -313,7 +309,7 @@ public class StreamProjection<IN> {
 	 * @param type7
 	 *            The class of field '7' of the result Tuples.
 	 * @return The projected DataStream.
-	 *
+	 * 
 	 * @see Tuple
 	 * @see DataStream
 	 */
@@ -325,18 +321,19 @@ public class StreamProjection<IN> {
 			throw new IllegalArgumentException(
 					"Numbers of projected fields and types do not match.");
 		}
-		TypeWrapper<Tuple8<T0, T1, T2, T3, T4, T5, T6, T7>> outTypeWrapper = new ProjectTypeWrapper<IN, Tuple8<T0, T1, T2, T3, T4, T5, T6, T7>>(
-				inTypeWrapper, fieldIndexes, types);
-		return dataStream.addFunction("projection", null, inTypeWrapper, outTypeWrapper,
-				new ProjectInvokable<IN, Tuple8<T0, T1, T2, T3, T4, T5, T6, T7>>(fieldIndexes,
-						outTypeWrapper));
 
+		@SuppressWarnings("unchecked")
+		TypeInformation<Tuple8<T0, T1, T2, T3, T4, T5, T6, T7>> outType = (TypeInformation<Tuple8<T0, T1, T2, T3, T4, T5, T6, T7>>) extractFieldTypes(
+				fieldIndexes, types, inTypeInfo);
+		return dataStream.transform("projection", outType,
+				new ProjectInvokable<IN, Tuple8<T0, T1, T2, T3, T4, T5, T6, T7>>(fieldIndexes,
+						outType));
 	}
 
 	/**
 	 * Projects a {@link Tuple} {@link DataStream} to the previously selected
 	 * fields. Requires the classes of the fields of the resulting Tuples.
-	 *
+	 * 
 	 * @param type0
 	 *            The class of field '0' of the result Tuples.
 	 * @param type1
@@ -356,7 +353,7 @@ public class StreamProjection<IN> {
 	 * @param type8
 	 *            The class of field '8' of the result Tuples.
 	 * @return The projected DataStream.
-	 *
+	 * 
 	 * @see Tuple
 	 * @see DataStream
 	 */
@@ -369,17 +366,18 @@ public class StreamProjection<IN> {
 					"Numbers of projected fields and types do not match.");
 		}
 
-		TypeWrapper<Tuple9<T0, T1, T2, T3, T4, T5, T6, T7, T8>> outTypeWrapper = new ProjectTypeWrapper<IN, Tuple9<T0, T1, T2, T3, T4, T5, T6, T7, T8>>(
-				inTypeWrapper, fieldIndexes, types);
-		return dataStream.addFunction("projection", null, inTypeWrapper, outTypeWrapper,
+		@SuppressWarnings("unchecked")
+		TypeInformation<Tuple9<T0, T1, T2, T3, T4, T5, T6, T7, T8>> outType = (TypeInformation<Tuple9<T0, T1, T2, T3, T4, T5, T6, T7, T8>>) extractFieldTypes(
+				fieldIndexes, types, inTypeInfo);
+		return dataStream.transform("projection", outType,
 				new ProjectInvokable<IN, Tuple9<T0, T1, T2, T3, T4, T5, T6, T7, T8>>(fieldIndexes,
-						outTypeWrapper));
+						outType));
 	}
 
 	/**
 	 * Projects a {@link Tuple} {@link DataStream} to the previously selected
 	 * fields. Requires the classes of the fields of the resulting Tuples.
-	 *
+	 * 
 	 * @param type0
 	 *            The class of field '0' of the result Tuples.
 	 * @param type1
@@ -401,7 +399,7 @@ public class StreamProjection<IN> {
 	 * @param type9
 	 *            The class of field '9' of the result Tuples.
 	 * @return The projected DataStream.
-	 *
+	 * 
 	 * @see Tuple
 	 * @see DataStream
 	 */
@@ -414,17 +412,18 @@ public class StreamProjection<IN> {
 					"Numbers of projected fields and types do not match.");
 		}
 
-		TypeWrapper<Tuple10<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9>> outTypeWrapper = new ProjectTypeWrapper<IN, Tuple10<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9>>(
-				inTypeWrapper, fieldIndexes, types);
-		return dataStream.addFunction("projection", null, inTypeWrapper, outTypeWrapper,
+		@SuppressWarnings("unchecked")
+		TypeInformation<Tuple10<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9>> outType = (TypeInformation<Tuple10<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9>>) extractFieldTypes(
+				fieldIndexes, types, inTypeInfo);
+		return dataStream.transform("projection", outType,
 				new ProjectInvokable<IN, Tuple10<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9>>(
-						fieldIndexes, outTypeWrapper));
+						fieldIndexes, outType));
 	}
 
 	/**
 	 * Projects a {@link Tuple} {@link DataStream} to the previously selected
 	 * fields. Requires the classes of the fields of the resulting Tuples.
-	 *
+	 * 
 	 * @param type0
 	 *            The class of field '0' of the result Tuples.
 	 * @param type1
@@ -448,7 +447,7 @@ public class StreamProjection<IN> {
 	 * @param type10
 	 *            The class of field '10' of the result Tuples.
 	 * @return The projected DataStream.
-	 *
+	 * 
 	 * @see Tuple
 	 * @see DataStream
 	 */
@@ -462,18 +461,19 @@ public class StreamProjection<IN> {
 			throw new IllegalArgumentException(
 					"Numbers of projected fields and types do not match.");
 		}
-		TypeWrapper<Tuple11<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10>> outTypeWrapper = new ProjectTypeWrapper<IN, Tuple11<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10>>(
-				inTypeWrapper, fieldIndexes, types);
-		return dataStream.addFunction("projection", null, inTypeWrapper, outTypeWrapper,
-				new ProjectInvokable<IN, Tuple11<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10>>(
-						fieldIndexes, outTypeWrapper));
 
+		@SuppressWarnings("unchecked")
+		TypeInformation<Tuple11<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10>> outType = (TypeInformation<Tuple11<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10>>) extractFieldTypes(
+				fieldIndexes, types, inTypeInfo);
+		return dataStream.transform("projection", outType,
+				new ProjectInvokable<IN, Tuple11<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10>>(
+						fieldIndexes, outType));
 	}
 
 	/**
 	 * Projects a {@link Tuple} {@link DataStream} to the previously selected
 	 * fields. Requires the classes of the fields of the resulting Tuples.
-	 *
+	 * 
 	 * @param type0
 	 *            The class of field '0' of the result Tuples.
 	 * @param type1
@@ -499,7 +499,7 @@ public class StreamProjection<IN> {
 	 * @param type11
 	 *            The class of field '11' of the result Tuples.
 	 * @return The projected DataStream.
-	 *
+	 * 
 	 * @see Tuple
 	 * @see DataStream
 	 */
@@ -513,23 +513,22 @@ public class StreamProjection<IN> {
 			throw new IllegalArgumentException(
 					"Numbers of projected fields and types do not match.");
 		}
-		TypeWrapper<Tuple12<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11>> outTypeWrapper = new ProjectTypeWrapper<IN, Tuple12<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11>>(
-				inTypeWrapper, fieldIndexes, types);
-		return dataStream
-				.addFunction(
-						"projection",
-						null,
-						inTypeWrapper,
-						outTypeWrapper,
-						new ProjectInvokable<IN, Tuple12<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11>>(
-								fieldIndexes, outTypeWrapper));
 
+		@SuppressWarnings("unchecked")
+		TypeInformation<Tuple12<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11>> outType = (TypeInformation<Tuple12<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11>>) extractFieldTypes(
+				fieldIndexes, types, inTypeInfo);
+		return dataStream
+				.transform(
+						"projection",
+						outType,
+						new ProjectInvokable<IN, Tuple12<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11>>(
+								fieldIndexes, outType));
 	}
 
 	/**
 	 * Projects a {@link Tuple} {@link DataStream} to the previously selected
 	 * fields. Requires the classes of the fields of the resulting Tuples.
-	 *
+	 * 
 	 * @param type0
 	 *            The class of field '0' of the result Tuples.
 	 * @param type1
@@ -557,7 +556,7 @@ public class StreamProjection<IN> {
 	 * @param type12
 	 *            The class of field '12' of the result Tuples.
 	 * @return The projected DataStream.
-	 *
+	 * 
 	 * @see Tuple
 	 * @see DataStream
 	 */
@@ -572,22 +571,21 @@ public class StreamProjection<IN> {
 					"Numbers of projected fields and types do not match.");
 		}
 
-		TypeWrapper<Tuple13<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12>> outTypeWrapper = new ProjectTypeWrapper<IN, Tuple13<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12>>(
-				inTypeWrapper, fieldIndexes, types);
+		@SuppressWarnings("unchecked")
+		TypeInformation<Tuple13<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12>> outType = (TypeInformation<Tuple13<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12>>) extractFieldTypes(
+				fieldIndexes, types, inTypeInfo);
 		return dataStream
-				.addFunction(
+				.transform(
 						"projection",
-						null,
-						inTypeWrapper,
-						outTypeWrapper,
+						outType,
 						new ProjectInvokable<IN, Tuple13<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12>>(
-								fieldIndexes, outTypeWrapper));
+								fieldIndexes, outType));
 	}
 
 	/**
 	 * Projects a {@link Tuple} {@link DataStream} to the previously selected
 	 * fields. Requires the classes of the fields of the resulting Tuples.
-	 *
+	 * 
 	 * @param type0
 	 *            The class of field '0' of the result Tuples.
 	 * @param type1
@@ -617,7 +615,7 @@ public class StreamProjection<IN> {
 	 * @param type13
 	 *            The class of field '13' of the result Tuples.
 	 * @return The projected DataStream.
-	 *
+	 * 
 	 * @see Tuple
 	 * @see DataStream
 	 */
@@ -632,23 +630,21 @@ public class StreamProjection<IN> {
 					"Numbers of projected fields and types do not match.");
 		}
 
-		TypeWrapper<Tuple14<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13>> outTypeWrapper = new ProjectTypeWrapper<IN, Tuple14<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13>>(
-				inTypeWrapper, fieldIndexes, types);
+		@SuppressWarnings("unchecked")
+		TypeInformation<Tuple14<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13>> outType = (TypeInformation<Tuple14<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13>>) extractFieldTypes(
+				fieldIndexes, types, inTypeInfo);
 		return dataStream
-				.addFunction(
+				.transform(
 						"projection",
-						null,
-						inTypeWrapper,
-						outTypeWrapper,
+						outType,
 						new ProjectInvokable<IN, Tuple14<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13>>(
-								fieldIndexes, outTypeWrapper));
-
+								fieldIndexes, outType));
 	}
 
 	/**
 	 * Projects a {@link Tuple} {@link DataStream} to the previously selected
 	 * fields. Requires the classes of the fields of the resulting Tuples.
-	 *
+	 * 
 	 * @param type0
 	 *            The class of field '0' of the result Tuples.
 	 * @param type1
@@ -680,7 +676,7 @@ public class StreamProjection<IN> {
 	 * @param type14
 	 *            The class of field '14' of the result Tuples.
 	 * @return The projected DataStream.
-	 *
+	 * 
 	 * @see Tuple
 	 * @see DataStream
 	 */
@@ -696,23 +692,21 @@ public class StreamProjection<IN> {
 					"Numbers of projected fields and types do not match.");
 		}
 
-		TypeWrapper<Tuple15<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14>> outTypeWrapper = new ProjectTypeWrapper<IN, Tuple15<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14>>(
-				inTypeWrapper, fieldIndexes, types);
+		@SuppressWarnings("unchecked")
+		TypeInformation<Tuple15<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14>> outType = (TypeInformation<Tuple15<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14>>) extractFieldTypes(
+				fieldIndexes, types, inTypeInfo);
 		return dataStream
-				.addFunction(
+				.transform(
 						"projection",
-						null,
-						inTypeWrapper,
-						outTypeWrapper,
+						outType,
 						new ProjectInvokable<IN, Tuple15<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14>>(
-								fieldIndexes, outTypeWrapper));
-
+								fieldIndexes, outType));
 	}
 
 	/**
 	 * Projects a {@link Tuple} {@link DataStream} to the previously selected
 	 * fields. Requires the classes of the fields of the resulting Tuples.
-	 *
+	 * 
 	 * @param type0
 	 *            The class of field '0' of the result Tuples.
 	 * @param type1
@@ -746,7 +740,7 @@ public class StreamProjection<IN> {
 	 * @param type15
 	 *            The class of field '15' of the result Tuples.
 	 * @return The projected DataStream.
-	 *
+	 * 
 	 * @see Tuple
 	 * @see DataStream
 	 */
@@ -762,23 +756,21 @@ public class StreamProjection<IN> {
 					"Numbers of projected fields and types do not match.");
 		}
 
-		TypeWrapper<Tuple16<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15>> outTypeWrapper = new ProjectTypeWrapper<IN, Tuple16<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15>>(
-				inTypeWrapper, fieldIndexes, types);
+		@SuppressWarnings("unchecked")
+		TypeInformation<Tuple16<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15>> outType = (TypeInformation<Tuple16<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15>>) extractFieldTypes(
+				fieldIndexes, types, inTypeInfo);
 		return dataStream
-				.addFunction(
+				.transform(
 						"projection",
-						null,
-						inTypeWrapper,
-						outTypeWrapper,
+						outType,
 						new ProjectInvokable<IN, Tuple16<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15>>(
-								fieldIndexes, outTypeWrapper));
-
+								fieldIndexes, outType));
 	}
 
 	/**
 	 * Projects a {@link Tuple} {@link DataStream} to the previously selected
 	 * fields. Requires the classes of the fields of the resulting Tuples.
-	 *
+	 * 
 	 * @param type0
 	 *            The class of field '0' of the result Tuples.
 	 * @param type1
@@ -814,7 +806,7 @@ public class StreamProjection<IN> {
 	 * @param type16
 	 *            The class of field '16' of the result Tuples.
 	 * @return The projected DataStream.
-	 *
+	 * 
 	 * @see Tuple
 	 * @see DataStream
 	 */
@@ -830,22 +822,21 @@ public class StreamProjection<IN> {
 					"Numbers of projected fields and types do not match.");
 		}
 
-		TypeWrapper<Tuple17<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16>> outTypeWrapper = new ProjectTypeWrapper<IN, Tuple17<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16>>(
-				inTypeWrapper, fieldIndexes, types);
+		@SuppressWarnings("unchecked")
+		TypeInformation<Tuple17<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16>> outType = (TypeInformation<Tuple17<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16>>) extractFieldTypes(
+				fieldIndexes, types, inTypeInfo);
 		return dataStream
-				.addFunction(
+				.transform(
 						"projection",
-						null,
-						inTypeWrapper,
-						outTypeWrapper,
+						outType,
 						new ProjectInvokable<IN, Tuple17<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16>>(
-								fieldIndexes, outTypeWrapper));
+								fieldIndexes, outType));
 	}
 
 	/**
 	 * Projects a {@link Tuple} {@link DataStream} to the previously selected
 	 * fields. Requires the classes of the fields of the resulting Tuples.
-	 *
+	 * 
 	 * @param type0
 	 *            The class of field '0' of the result Tuples.
 	 * @param type1
@@ -883,7 +874,7 @@ public class StreamProjection<IN> {
 	 * @param type17
 	 *            The class of field '17' of the result Tuples.
 	 * @return The projected DataStream.
-	 *
+	 * 
 	 * @see Tuple
 	 * @see DataStream
 	 */
@@ -899,22 +890,21 @@ public class StreamProjection<IN> {
 					"Numbers of projected fields and types do not match.");
 		}
 
-		TypeWrapper<Tuple18<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17>> outTypeWrapper = new ProjectTypeWrapper<IN, Tuple18<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17>>(
-				inTypeWrapper, fieldIndexes, types);
+		@SuppressWarnings("unchecked")
+		TypeInformation<Tuple18<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17>> outType = (TypeInformation<Tuple18<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17>>) extractFieldTypes(
+				fieldIndexes, types, inTypeInfo);
 		return dataStream
-				.addFunction(
+				.transform(
 						"projection",
-						null,
-						inTypeWrapper,
-						outTypeWrapper,
+						outType,
 						new ProjectInvokable<IN, Tuple18<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17>>(
-								fieldIndexes, outTypeWrapper));
+								fieldIndexes, outType));
 	}
 
 	/**
 	 * Projects a {@link Tuple} {@link DataStream} to the previously selected
 	 * fields. Requires the classes of the fields of the resulting Tuples.
-	 *
+	 * 
 	 * @param type0
 	 *            The class of field '0' of the result Tuples.
 	 * @param type1
@@ -954,7 +944,7 @@ public class StreamProjection<IN> {
 	 * @param type18
 	 *            The class of field '18' of the result Tuples.
 	 * @return The projected DataStream.
-	 *
+	 * 
 	 * @see Tuple
 	 * @see DataStream
 	 */
@@ -971,22 +961,21 @@ public class StreamProjection<IN> {
 					"Numbers of projected fields and types do not match.");
 		}
 
-		TypeWrapper<Tuple19<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18>> outTypeWrapper = new ProjectTypeWrapper<IN, Tuple19<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18>>(
-				inTypeWrapper, fieldIndexes, types);
+		@SuppressWarnings("unchecked")
+		TypeInformation<Tuple19<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18>> outType = (TypeInformation<Tuple19<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18>>) extractFieldTypes(
+				fieldIndexes, types, inTypeInfo);
 		return dataStream
-				.addFunction(
+				.transform(
 						"projection",
-						null,
-						inTypeWrapper,
-						outTypeWrapper,
+						outType,
 						new ProjectInvokable<IN, Tuple19<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18>>(
-								fieldIndexes, outTypeWrapper));
+								fieldIndexes, outType));
 	}
 
 	/**
 	 * Projects a {@link Tuple} {@link DataStream} to the previously selected
 	 * fields. Requires the classes of the fields of the resulting Tuples.
-	 *
+	 * 
 	 * @param type0
 	 *            The class of field '0' of the result Tuples.
 	 * @param type1
@@ -1028,7 +1017,7 @@ public class StreamProjection<IN> {
 	 * @param type19
 	 *            The class of field '19' of the result Tuples.
 	 * @return The projected DataStream.
-	 *
+	 * 
 	 * @see Tuple
 	 * @see DataStream
 	 */
@@ -1045,23 +1034,21 @@ public class StreamProjection<IN> {
 					"Numbers of projected fields and types do not match.");
 		}
 
-		TypeWrapper<Tuple20<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19>> outTypeWrapper = new ProjectTypeWrapper<IN, Tuple20<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19>>(
-				inTypeWrapper, fieldIndexes, types);
+		@SuppressWarnings("unchecked")
+		TypeInformation<Tuple20<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19>> outType = (TypeInformation<Tuple20<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19>>) extractFieldTypes(
+				fieldIndexes, types, inTypeInfo);
 		return dataStream
-				.addFunction(
+				.transform(
 						"projection",
-						null,
-						inTypeWrapper,
-						outTypeWrapper,
+						outType,
 						new ProjectInvokable<IN, Tuple20<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19>>(
-								fieldIndexes, outTypeWrapper));
-
+								fieldIndexes, outType));
 	}
 
 	/**
 	 * Projects a {@link Tuple} {@link DataStream} to the previously selected
 	 * fields. Requires the classes of the fields of the resulting Tuples.
-	 *
+	 * 
 	 * @param type0
 	 *            The class of field '0' of the result Tuples.
 	 * @param type1
@@ -1105,7 +1092,7 @@ public class StreamProjection<IN> {
 	 * @param type20
 	 *            The class of field '20' of the result Tuples.
 	 * @return The projected DataStream.
-	 *
+	 * 
 	 * @see Tuple
 	 * @see DataStream
 	 */
@@ -1123,22 +1110,21 @@ public class StreamProjection<IN> {
 					"Numbers of projected fields and types do not match.");
 		}
 
-		TypeWrapper<Tuple21<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20>> outTypeWrapper = new ProjectTypeWrapper<IN, Tuple21<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20>>(
-				inTypeWrapper, fieldIndexes, types);
+		@SuppressWarnings("unchecked")
+		TypeInformation<Tuple21<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20>> outType = (TypeInformation<Tuple21<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20>>) extractFieldTypes(
+				fieldIndexes, types, inTypeInfo);
 		return dataStream
-				.addFunction(
+				.transform(
 						"projection",
-						null,
-						inTypeWrapper,
-						outTypeWrapper,
+						outType,
 						new ProjectInvokable<IN, Tuple21<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20>>(
-								fieldIndexes, outTypeWrapper));
+								fieldIndexes, outType));
 	}
 
 	/**
 	 * Projects a {@link Tuple} {@link DataStream} to the previously selected
 	 * fields. Requires the classes of the fields of the resulting Tuples.
-	 *
+	 * 
 	 * @param type0
 	 *            The class of field '0' of the result Tuples.
 	 * @param type1
@@ -1184,7 +1170,7 @@ public class StreamProjection<IN> {
 	 * @param type21
 	 *            The class of field '21' of the result Tuples.
 	 * @return The projected DataStream.
-	 *
+	 * 
 	 * @see Tuple
 	 * @see DataStream
 	 */
@@ -1202,22 +1188,21 @@ public class StreamProjection<IN> {
 					"Numbers of projected fields and types do not match.");
 		}
 
-		TypeWrapper<Tuple22<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21>> outTypeWrapper = new ProjectTypeWrapper<IN, Tuple22<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21>>(
-				inTypeWrapper, fieldIndexes, types);
+		@SuppressWarnings("unchecked")
+		TypeInformation<Tuple22<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21>> outType = (TypeInformation<Tuple22<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21>>) extractFieldTypes(
+				fieldIndexes, types, inTypeInfo);
 		return dataStream
-				.addFunction(
+				.transform(
 						"projection",
-						null,
-						inTypeWrapper,
-						outTypeWrapper,
+						outType,
 						new ProjectInvokable<IN, Tuple22<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21>>(
-								fieldIndexes, outTypeWrapper));
+								fieldIndexes, outType));
 	}
 
 	/**
 	 * Projects a {@link Tuple} {@link DataStream} to the previously selected
 	 * fields. Requires the classes of the fields of the resulting Tuples.
-	 *
+	 * 
 	 * @param type0
 	 *            The class of field '0' of the result Tuples.
 	 * @param type1
@@ -1265,7 +1250,7 @@ public class StreamProjection<IN> {
 	 * @param type22
 	 *            The class of field '22' of the result Tuples.
 	 * @return The projected DataStream.
-	 *
+	 * 
 	 * @see Tuple
 	 * @see DataStream
 	 */
@@ -1284,22 +1269,21 @@ public class StreamProjection<IN> {
 					"Numbers of projected fields and types do not match.");
 		}
 
-		TypeWrapper<Tuple23<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22>> outTypeWrapper = new ProjectTypeWrapper<IN, Tuple23<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22>>(
-				inTypeWrapper, fieldIndexes, types);
+		@SuppressWarnings("unchecked")
+		TypeInformation<Tuple23<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22>> outType = (TypeInformation<Tuple23<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22>>) extractFieldTypes(
+				fieldIndexes, types, inTypeInfo);
 		return dataStream
-				.addFunction(
+				.transform(
 						"projection",
-						null,
-						inTypeWrapper,
-						outTypeWrapper,
+						outType,
 						new ProjectInvokable<IN, Tuple23<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22>>(
-								fieldIndexes, outTypeWrapper));
+								fieldIndexes, outType));
 	}
 
 	/**
 	 * Projects a {@link Tuple} {@link DataStream} to the previously selected
 	 * fields. Requires the classes of the fields of the resulting Tuples.
-	 *
+	 * 
 	 * @param type0
 	 *            The class of field '0' of the result Tuples.
 	 * @param type1
@@ -1349,7 +1333,7 @@ public class StreamProjection<IN> {
 	 * @param type23
 	 *            The class of field '23' of the result Tuples.
 	 * @return The projected DataStream.
-	 *
+	 * 
 	 * @see Tuple
 	 * @see DataStream
 	 */
@@ -1368,22 +1352,21 @@ public class StreamProjection<IN> {
 					"Numbers of projected fields and types do not match.");
 		}
 
-		TypeWrapper<Tuple24<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23>> outTypeWrapper = new ProjectTypeWrapper<IN, Tuple24<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23>>(
-				inTypeWrapper, fieldIndexes, types);
+		@SuppressWarnings("unchecked")
+		TypeInformation<Tuple24<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23>> outType = (TypeInformation<Tuple24<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23>>) extractFieldTypes(
+				fieldIndexes, types, inTypeInfo);
 		return dataStream
-				.addFunction(
+				.transform(
 						"projection",
-						null,
-						inTypeWrapper,
-						outTypeWrapper,
+						outType,
 						new ProjectInvokable<IN, Tuple24<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23>>(
-								fieldIndexes, outTypeWrapper));
+								fieldIndexes, outType));
 	}
 
 	/**
 	 * Projects a {@link Tuple} {@link DataStream} to the previously selected
 	 * fields. Requires the classes of the fields of the resulting Tuples.
-	 *
+	 * 
 	 * @param type0
 	 *            The class of field '0' of the result Tuples.
 	 * @param type1
@@ -1435,7 +1418,7 @@ public class StreamProjection<IN> {
 	 * @param type24
 	 *            The class of field '24' of the result Tuples.
 	 * @return The projected DataStream.
-	 *
+	 * 
 	 * @see Tuple
 	 * @see DataStream
 	 */
@@ -1454,16 +1437,35 @@ public class StreamProjection<IN> {
 					"Numbers of projected fields and types do not match.");
 		}
 
-		TypeWrapper<Tuple25<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24>> outTypeWrapper = new ProjectTypeWrapper<IN, Tuple25<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24>>(
-				inTypeWrapper, fieldIndexes, types);
+		@SuppressWarnings("unchecked")
+		TypeInformation<Tuple25<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24>> outType = (TypeInformation<Tuple25<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24>>) extractFieldTypes(
+				fieldIndexes, types, inTypeInfo);
 		return dataStream
-				.addFunction(
+				.transform(
 						"projection",
-						null,
-						inTypeWrapper,
-						outTypeWrapper,
+
+						outType,
 						new ProjectInvokable<IN, Tuple25<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24>>(
-								fieldIndexes, outTypeWrapper));
+								fieldIndexes, outType));
+	}
+
+	public static TypeInformation<?> extractFieldTypes(int[] fields, Class<?>[] givenTypes,
+			TypeInformation<?> inType) {
+
+		TupleTypeInfo<?> inTupleType = (TupleTypeInfo<?>) inType;
+		TypeInformation<?>[] fieldTypes = new TypeInformation[fields.length];
+
+		for (int i = 0; i < fields.length; i++) {
+
+			if (inTupleType.getTypeAt(fields[i]).getTypeClass() != givenTypes[i]) {
+				throw new IllegalArgumentException(
+						"Given types do not match types of input data set.");
+			}
+
+			fieldTypes[i] = inTupleType.getTypeAt(fields[i]);
+		}
+
+		return new TupleTypeInfo<Tuple>(fieldTypes);
 	}
 
 }

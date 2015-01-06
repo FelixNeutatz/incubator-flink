@@ -37,7 +37,7 @@ import org.apache.flink.core.memory.SeekableDataOutputView;
 import org.apache.flink.runtime.io.disk.ChannelReaderInputViewIterator;
 import org.apache.flink.runtime.io.disk.iomanager.BlockChannelReader;
 import org.apache.flink.runtime.io.disk.iomanager.BulkBlockChannelReader;
-import org.apache.flink.runtime.io.disk.iomanager.Channel;
+import org.apache.flink.runtime.io.disk.iomanager.FileIOChannel;
 import org.apache.flink.runtime.io.disk.iomanager.ChannelReaderInputView;
 import org.apache.flink.runtime.io.disk.iomanager.HeaderlessChannelReaderInputView;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
@@ -306,7 +306,7 @@ public class MutableHashTable<BT, PT> implements MemorySegmentSource {
 	 * The channel enumerator that is used while processing the current partition to create
 	 * channels for the spill partitions it requires.
 	 */
-	protected Channel.Enumerator currentEnumerator;
+	protected FileIOChannel.Enumerator currentEnumerator;
 	
 	/**
 	 * The array of memory segments that contain the buckets which form the actual hash-table
@@ -1129,9 +1129,6 @@ public class MutableHashTable<BT, PT> implements MemorySegmentSource {
 	 * may free new buffers then.
 	 * 
 	 * @return The next buffer to be used by the hash-table, or null, if no buffer remains.
-	 * @throws IOException Thrown, if the thread is interrupted while grabbing the next buffer. The I/O
-	 *                     exception replaces the <tt>InterruptedException</tt> to consolidate the exception
-	 *                     signatures.
 	 */
 	final MemorySegment getNextBuffer() {
 		// check if the list directly offers memory

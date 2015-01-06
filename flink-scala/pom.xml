@@ -24,7 +24,7 @@ under the License.
 	<parent>
 		<groupId>org.apache.flink</groupId>
 		<artifactId>flink-parent</artifactId>
-		<version>0.8-incubating-SNAPSHOT</version>
+		<version>0.9-SNAPSHOT</version>
 		<relativePath>..</relativePath>
 	</parent>
 
@@ -54,19 +54,16 @@ under the License.
 		<dependency>
 			<groupId>org.scala-lang</groupId>
 			<artifactId>scala-reflect</artifactId>
-			<version>${scala.version}</version>
 		</dependency>
 
 		<dependency>
 			<groupId>org.scala-lang</groupId>
 			<artifactId>scala-library</artifactId>
-			<version>${scala.version}</version>
 		</dependency>
 
 		<dependency>
 			<groupId>org.scala-lang</groupId>
 			<artifactId>scala-compiler</artifactId>
-			<version>${scala.version}</version>
 		</dependency>
 
 		<dependency>
@@ -78,7 +75,6 @@ under the License.
 		<dependency>
 			<groupId>org.ow2.asm</groupId>
 			<artifactId>asm</artifactId>
-			<version>4.0</version>
 		</dependency>
 		
 		<!--  guava needs to be in "provided" scope, to make sure it is not included into the jars by the shading -->
@@ -94,6 +90,14 @@ under the License.
 			<artifactId>flink-test-utils</artifactId>
 			<version>${project.version}</version>
 			<scope>test</scope>
+		</dependency>
+
+		<dependency>
+			<groupId>org.apache.flink</groupId>
+			<artifactId>flink-core</artifactId>
+			<version>${project.version}</version>
+			<scope>test</scope>
+			<type>test-jar</type>
 		</dependency>
 
 	</dependencies>
@@ -204,7 +208,7 @@ under the License.
 					</execution>
 				</executions>
 			</plugin>
-			
+
 			<plugin>
 				<groupId>org.scalastyle</groupId>
 				<artifactId>scalastyle-maven-plugin</artifactId>
@@ -228,7 +232,7 @@ under the License.
 					<outputEncoding>UTF-8</outputEncoding>
 				</configuration>
 			</plugin>
-			
+
 		</plugins>
 	</build>
 

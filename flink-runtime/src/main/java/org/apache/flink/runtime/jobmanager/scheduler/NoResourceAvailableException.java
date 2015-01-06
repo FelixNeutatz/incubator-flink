@@ -36,12 +36,30 @@ public class NoResourceAvailableException extends JobException {
 				+ ". You can decrease the operator parallelism or increase the number of slots per TaskManager in the configuration.");
 	}
 	
-	NoResourceAvailableException(int numInstances, int numSlotsTotal) {
+	public NoResourceAvailableException(int numInstances, int numSlotsTotal) {
 		super(String.format("%s Resources available to scheduler: Number of instances=%d, total number of slots=%d", 
 				BASE_MESSAGE, numInstances, numSlotsTotal));
+	}
+	
+	NoResourceAvailableException(ScheduledUnit task, int numInstances, int numSlotsTotal) {
+		super(String.format("%s Task to schedule: < %s > in sharing group < %s >. Resources available to scheduler: Number of instances=%d, total number of slots=%d", 
+				BASE_MESSAGE, task.getTaskToExecute(), task.getSlotSharingGroup(), numInstances, numSlotsTotal));
 	}
 
 	public NoResourceAvailableException(String message) {
 		super(message);
+	}
+
+	@Override
+	public boolean equals(Object obj){
+		if(obj == null){
+			return false;
+		}
+
+		if(!(obj instanceof NoResourceAvailableException)){
+			return false;
+		}else{
+			return getMessage().equals(((NoResourceAvailableException)obj).getMessage());
+		}
 	}
 }

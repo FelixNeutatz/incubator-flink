@@ -19,6 +19,7 @@
 
 package org.apache.flink.api.common.accumulators;
 
+import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -53,7 +54,8 @@ public class AccumulatorHelper {
 	/**
 	 * Workaround method for type safety
 	 */
-	private static final <V, R> void mergeSingle(Accumulator<?, ?> target, Accumulator<?, ?> toMerge) {
+	private static final <V, R extends Serializable> void mergeSingle(Accumulator<?, ?> target,
+															Accumulator<?, ?> toMerge) {
 		@SuppressWarnings("unchecked")
 		Accumulator<V, R> typedTarget = (Accumulator<V, R>) target;
 
@@ -113,6 +115,17 @@ public class AccumulatorHelper {
 			entry.getValue().resetLocal();
 		}
 		accumulators.clear();
+	}
+
+	public static Map<String, Accumulator<?, ?>> copy(final Map<String, Accumulator<?,
+			?>> accumulators) {
+		Map<String, Accumulator<?, ?>> result = new HashMap<String, Accumulator<?, ?>>();
+
+		for(Map.Entry<String, Accumulator<?, ?>> entry: accumulators.entrySet()){
+			result.put(entry.getKey(), entry.getValue().clone());
+		}
+
+		return result;
 	}
 
 }

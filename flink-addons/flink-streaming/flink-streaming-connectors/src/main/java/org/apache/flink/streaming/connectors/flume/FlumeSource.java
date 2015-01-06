@@ -20,7 +20,8 @@ package org.apache.flink.streaming.connectors.flume;
 import java.util.List;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.function.source.RichSourceFunction;
+import org.apache.flink.streaming.connectors.ConnectorSource;
+import org.apache.flink.streaming.connectors.util.DeserializationSchema;
 import org.apache.flink.util.Collector;
 import org.apache.flume.Context;
 import org.apache.flume.channel.ChannelProcessor;
@@ -28,13 +29,15 @@ import org.apache.flume.source.AvroSource;
 import org.apache.flume.source.avro.AvroFlumeEvent;
 import org.apache.flume.source.avro.Status;
 
-public abstract class FlumeSource<OUT> extends RichSourceFunction<OUT> {
+public class FlumeSource<OUT> extends ConnectorSource<OUT> {
 	private static final long serialVersionUID = 1L;
 
 	String host;
 	String port;
+	volatile boolean finished = false;
 
-	FlumeSource(String host, int port) {
+	FlumeSource(String host, int port, DeserializationSchema<OUT> deserializationSchema) {
+		super(deserializationSchema);
 		this.host = host;
 		this.port = Integer.toString(port);
 	}
@@ -48,7 +51,8 @@ public abstract class FlumeSource<OUT> extends RichSourceFunction<OUT> {
 		 * 
 		 * @param avroEvent
 		 *            The event that should be sent to the dataStream
-		 * @return A {@link Status}.OK message if sending the event was successful.
+		 * @return A {@link Status}.OK message if sending the event was
+		 *         successful.
 		 */
 		@Override
 		public Status append(AvroFlumeEvent avroEvent) {
@@ -82,30 +86,21 @@ public abstract class FlumeSource<OUT> extends RichSourceFunction<OUT> {
 		 */
 		private void collect(AvroFlumeEvent avroEvent) {
 			byte[] b = avroEvent.getBody().array();
-			OUT tuple = FlumeSource.this.deserialize(b);
-			if (!closeWithoutSend) {
-				collector.collect(tuple);
+			OUT out = FlumeSource.this.schema.deserialize(b);
+
+			if (schema.isEndOfStream(out)) {
+				FlumeSource.this.finished = true;
+				this.stop();
+				FlumeSource.this.notifyAll();
+			} else {
+				collector.collect(out);
 			}
-			if (sendAndClose) {
-				sendDone = true;
-			}
+
 		}
 
 	}
 
 	MyAvroSource avroSource;
-	private volatile boolean closeWithoutSend = false;
-	private boolean sendAndClose = false;
-	private volatile boolean sendDone = false;
-
-	/**
-	 * Deserializes the incoming data.
-	 * 
-	 * @param message
-	 *            The incoming message in a byte array
-	 * @return The deserialized message in the required format.
-	 */
-	public abstract OUT deserialize(byte[] message);
 
 	/**
 	 * Configures the AvroSource. Also sets the collector so the application can
@@ -138,26 +133,9 @@ public abstract class FlumeSource<OUT> extends RichSourceFunction<OUT> {
 	public void invoke(Collector<OUT> collector) throws Exception {
 		configureAvroSource(collector);
 		avroSource.start();
-		while (true) {
-			if (closeWithoutSend || sendDone) {
-				break;
-			}
+		while (!finished) {
+			this.wait();
 		}
-		avroSource.stop();
-	}
-
-	/**
-	 * Closes the connection only when the next message is sent after this call.
-	 */
-	public void sendAndClose() {
-		sendAndClose = true;
-	}
-
-	/**
-	 * Closes the connection immediately and no further data will be sent.
-	 */
-	public void closeWithoutSend() {
-		closeWithoutSend = true;
 	}
 
 }

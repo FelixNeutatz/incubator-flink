@@ -18,38 +18,48 @@
 
 package org.apache.flink.runtime.taskmanager;
 
-import java.io.IOException;
-
+import akka.actor.ActorRef;
 import org.apache.flink.core.io.InputSplit;
+import org.apache.flink.runtime.akka.AkkaUtils;
 import org.apache.flink.runtime.executiongraph.ExecutionAttemptID;
 import org.apache.flink.runtime.jobgraph.JobID;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.jobgraph.tasks.InputSplitProvider;
-import org.apache.flink.runtime.protocols.InputSplitProviderProtocol;
+import org.apache.flink.runtime.messages.JobManagerMessages;
+import org.apache.flink.runtime.messages.TaskManagerMessages;
+import scala.concurrent.duration.FiniteDuration;
 
 public class TaskInputSplitProvider implements InputSplitProvider {
 
-	private final InputSplitProviderProtocol protocol;
+	private final ActorRef jobManager;
 	
 	private final JobID jobId;
 	
 	private final JobVertexID vertexId;
+
+	private final ExecutionAttemptID executionID;
+
+	private final FiniteDuration timeout;
 	
-	private final ExecutionAttemptID executionAttempt;
-	
-	public TaskInputSplitProvider(InputSplitProviderProtocol protocol, JobID jobId, JobVertexID vertexId, ExecutionAttemptID executionAttempt) {
-		this.protocol = protocol;
+	public TaskInputSplitProvider(ActorRef jobManager, JobID jobId, JobVertexID vertexId,
+								ExecutionAttemptID executionID, FiniteDuration timeout) {
+		this.jobManager = jobManager;
 		this.jobId = jobId;
 		this.vertexId = vertexId;
-		this.executionAttempt = executionAttempt;
+		this.executionID = executionID;
+		this.timeout = timeout;
 	}
 
 	@Override
 	public InputSplit getNextInputSplit() {
 		try {
-			return protocol.requestNextInputSplit(jobId, vertexId, executionAttempt);
+			TaskManagerMessages.NextInputSplit nextInputSplit = AkkaUtils.ask(jobManager,
+					new JobManagerMessages.RequestNextInputSplit(jobId, vertexId, executionID),
+					timeout);
+
+			return nextInputSplit.inputSplit();
 		}
-		catch (IOException e) {
+		catch (Exception e) {
 			throw new RuntimeException("Requesting the next InputSplit failed.", e);
 		}
 	}

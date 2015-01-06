@@ -19,7 +19,6 @@ package org.apache.flink.streaming.api.streamvertex;
 
 import java.util.ArrayList;
 
-import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.runtime.io.network.api.MutableRecordReader;
 import org.apache.flink.runtime.plugable.DeserializationDelegate;
 import org.apache.flink.streaming.api.invokable.operator.co.CoInvokable;
@@ -29,10 +28,7 @@ import org.apache.flink.streaming.io.CoReaderIterator;
 import org.apache.flink.streaming.io.CoRecordReader;
 import org.apache.flink.util.MutableObjectIterator;
 
-public class CoStreamVertex<IN1, IN2, OUT> extends
-		StreamVertex<IN1,OUT> {
-
-	private OutputHandler<OUT> outputHandler;
+public class CoStreamVertex<IN1, IN2, OUT> extends StreamVertex<IN1, OUT> {
 
 	protected StreamRecordSerializer<IN1> inputDeserializer1 = null;
 	protected StreamRecordSerializer<IN2> inputDeserializer2 = null;
@@ -53,11 +49,8 @@ public class CoStreamVertex<IN1, IN2, OUT> extends
 	}
 
 	private void setDeserializers() {
-		TypeInformation<IN1> inputTypeInfo1 = configuration.getTypeInfoIn1();
-		inputDeserializer1 = new StreamRecordSerializer<IN1>(inputTypeInfo1);
-
-		TypeInformation<IN2> inputTypeInfo2 = configuration.getTypeInfoIn2();
-		inputDeserializer2 = new StreamRecordSerializer<IN2>(inputTypeInfo2);
+		inputDeserializer1 = configuration.getTypeSerializerIn1(userClassLoader);
+		inputDeserializer2 = configuration.getTypeSerializerIn2(userClassLoader);
 	}
 
 	@Override
@@ -72,9 +65,8 @@ public class CoStreamVertex<IN1, IN2, OUT> extends
 
 	@Override
 	protected void setInvokable() {
-		userInvokable = configuration.getUserInvokable();
-		userInvokable.initialize(outputHandler.getCollector(), coIter, inputDeserializer1,
-				inputDeserializer2, isMutable);
+		userInvokable = configuration.getUserInvokable(userClassLoader);
+		userInvokable.setup(this);
 	}
 
 	protected void setConfigInputs() throws StreamVertexException {
@@ -108,6 +100,38 @@ public class CoStreamVertex<IN1, IN2, OUT> extends
 	@Override
 	public void invoke() throws Exception {
 		outputHandler.invokeUserFunction("CO-TASK", userInvokable);
+	}
+
+	@SuppressWarnings("unchecked")
+	@Override
+	public <X> MutableObjectIterator<X> getInput(int index) {
+		switch (index) {
+		case 0:
+			return (MutableObjectIterator<X>) inputIter1;
+		case 1:
+			return (MutableObjectIterator<X>) inputIter2;
+		default:
+			throw new IllegalArgumentException("CoStreamVertex has only 2 inputs");
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	@Override
+	public <X> StreamRecordSerializer<X> getInputSerializer(int index) {
+		switch (index) {
+		case 0:
+			return (StreamRecordSerializer<X>) inputDeserializer1;
+		case 1:
+			return (StreamRecordSerializer<X>) inputDeserializer2;
+		default:
+			throw new IllegalArgumentException("CoStreamVertex has only 2 inputs");
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	@Override
+	public <X, Y> CoReaderIterator<X, Y> getCoReader() {
+		return (CoReaderIterator<X, Y>) coIter;
 	}
 
 }

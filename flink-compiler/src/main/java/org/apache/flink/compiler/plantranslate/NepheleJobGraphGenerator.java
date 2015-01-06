@@ -34,6 +34,7 @@ import org.apache.flink.api.common.aggregators.LongSumAggregator;
 import org.apache.flink.api.common.cache.DistributedCache;
 import org.apache.flink.api.common.cache.DistributedCache.DistributedCacheEntry;
 import org.apache.flink.api.common.distributions.DataDistribution;
+import org.apache.flink.api.common.operators.util.UserCodeWrapper;
 import org.apache.flink.api.common.typeutils.TypeSerializerFactory;
 import org.apache.flink.compiler.CompilerException;
 import org.apache.flink.compiler.dag.TempMode;
@@ -120,7 +121,9 @@ public class NepheleJobGraphGenerator implements Visitor<PlanNode> {
 	
 	private int iterationIdEnumerator = 1;
 	
-	private IterationPlanNode currentIteration;	// hack: as long as no nesting is possible, remember the enclosing iteration
+	private IterationPlanNode currentIteration; // the current the enclosing iteration
+	
+	private List<IterationPlanNode> iterationStack;  // stack of enclosing iterations
 	
 	private SlotSharingGroup sharingGroup;
 	
@@ -156,11 +159,17 @@ public class NepheleJobGraphGenerator implements Visitor<PlanNode> {
 		this.chainedTasksInSequence = new ArrayList<TaskInChain>();
 		this.auxVertices = new ArrayList<AbstractJobVertex>();
 		this.iterations = new HashMap<IterationPlanNode, IterationDescriptor>();
+		this.iterationStack = new ArrayList<IterationPlanNode>();
 		
 		this.sharingGroup = new SlotSharingGroup();
 		
 		// generate Nephele job graph
 		program.accept(this);
+		
+		// sanity check that we are not somehow in an iteration at the end
+		if (this.currentIteration != null) {
+			throw new CompilerException("The graph translation ended prematurely, leaving an unclosed iteration.");
+		}
 		
 		// finalize the iterations
 		for (IterationDescriptor iteration : this.iterations.values()) {
@@ -207,7 +216,8 @@ public class NepheleJobGraphGenerator implements Visitor<PlanNode> {
 		this.chainedTasksInSequence = null;
 		this.auxVertices = null;
 		this.iterations = null;
-
+		this.iterationStack = null;
+		
 		// return job graph
 		return graph;
 	}
@@ -391,13 +401,26 @@ public class NepheleJobGraphGenerator implements Visitor<PlanNode> {
 			
 			// check if we have an iteration. in that case, translate the step function now
 			if (node instanceof IterationPlanNode) {
-				// for now, prevent nested iterations
-				if (this.currentIteration != null) {
+				// prevent nested iterations
+				if (node.isOnDynamicPath()) {
 					throw new CompilerException("Nested Iterations are not possible at the moment!");
 				}
+				
+				// if we recursively go into an iteration (because the constant path of one iteration contains
+				// another one), we push the current one onto the stack
+				if (this.currentIteration != null) {
+					this.iterationStack.add(this.currentIteration);
+				}
+				
 				this.currentIteration = (IterationPlanNode) node;
 				this.currentIteration.acceptForStepFunction(this);
-				this.currentIteration = null;
+				
+				// pop the current iteration from the stack
+				if (this.iterationStack.isEmpty()) {
+					this.currentIteration = null;
+				} else {
+					this.currentIteration = this.iterationStack.remove(this.iterationStack.size() - 1);
+				}
 				
 				// inputs for initial bulk partial solution or initial workset are already connected to the iteration head in the head's post visit.
 				// connect the initial solution set now.
@@ -813,6 +836,7 @@ public class NepheleJobGraphGenerator implements Visitor<PlanNode> {
 		final TaskConfig config = new TaskConfig(vertex.getConfiguration());
 
 		vertex.setInvokableClass(DataSourceTask.class);
+		vertex.setFormatDescription(getDescriptionForUserCode(node.getPactContract().getUserCodeWrapper()));
 
 		// set user code
 		config.setStubWrapper(node.getPactContract().getUserCodeWrapper());
@@ -827,8 +851,8 @@ public class NepheleJobGraphGenerator implements Visitor<PlanNode> {
 		final TaskConfig config = new TaskConfig(vertex.getConfiguration());
 
 		vertex.setInvokableClass(DataSinkTask.class);
-		vertex.getConfiguration().setInteger(DataSinkTask.DEGREE_OF_PARALLELISM_KEY, node.getDegreeOfParallelism());
-
+		vertex.setFormatDescription(getDescriptionForUserCode(node.getPactContract().getUserCodeWrapper()));
+		
 		// set user code
 		config.setStubWrapper(node.getPactContract().getUserCodeWrapper());
 		config.setStubParameters(node.getPactContract().getParameters());
@@ -1024,6 +1048,7 @@ public class NepheleJobGraphGenerator implements Visitor<PlanNode> {
 			case PARTITION_RANDOM:
 			case BROADCAST:
 			case PARTITION_HASH:
+			case PARTITION_CUSTOM:
 			case PARTITION_RANGE:
 			case PARTITION_FORCED_REBALANCE:
 				distributionPattern = DistributionPattern.BIPARTITE;
@@ -1049,19 +1074,21 @@ public class NepheleJobGraphGenerator implements Visitor<PlanNode> {
 		if (channel.getShipStrategy() == ShipStrategyType.PARTITION_RANGE) {
 			
 			final DataDistribution dataDistribution = channel.getDataDistribution();
-			if(dataDistribution != null) {
+			if (dataDistribution != null) {
 				sourceConfig.setOutputDataDistribution(dataDistribution, outputIndex);
 			} else {
 				throw new RuntimeException("Range partitioning requires data distribution");
 				// TODO: inject code and configuration for automatic histogram generation
 			}
 		}
-//		if (targetContract instanceof GenericDataSink) {
-//			final DataDistribution distri = ((GenericDataSink) targetContract).getDataDistribution();
-//			if (distri != null) {
-//				configForOutputShipStrategy.setOutputDataDistribution(distri);
-//			}
-//		}
+		
+		if (channel.getShipStrategy() == ShipStrategyType.PARTITION_CUSTOM) {
+			if (channel.getPartitioner() != null) {
+				sourceConfig.setOutputPartitioner(channel.getPartitioner(), outputIndex);
+			} else {
+				throw new CompilerException("The ship strategy was set to custom partitioning, but no partitioner was set.");
+			}
+		}
 		
 		// ---------------- configure the receiver -------------------
 		if (isBroadcast) {
@@ -1400,6 +1427,25 @@ public class NepheleJobGraphGenerator implements Visitor<PlanNode> {
 		headConfig.addIterationAggregator(WorksetEmptyConvergenceCriterion.AGGREGATOR_NAME, new LongSumAggregator());
 		syncConfig.addIterationAggregator(WorksetEmptyConvergenceCriterion.AGGREGATOR_NAME, new LongSumAggregator());
 		syncConfig.setConvergenceCriterion(WorksetEmptyConvergenceCriterion.AGGREGATOR_NAME, new WorksetEmptyConvergenceCriterion());
+	}
+	
+	private static String getDescriptionForUserCode(UserCodeWrapper<?> wrapper) {
+		try {
+			if (wrapper.hasObject()) {
+				try {
+					return wrapper.getUserCodeObject().toString();
+				}
+				catch (Throwable t) {
+					return wrapper.getUserCodeClass().getName();
+				}
+			}
+			else {
+				return wrapper.getUserCodeClass().getName();
+			}
+		}
+		catch (Throwable t) {
+			return null;
+		}
 	}
 
 	// -------------------------------------------------------------------------------------

@@ -18,12 +18,16 @@
 
 package org.apache.flink.runtime.executiongraph;
 
+import static org.apache.flink.runtime.executiongraph.ExecutionGraphTestUtils.getExecutionVertex;
 import static org.apache.flink.runtime.executiongraph.ExecutionGraphTestUtils.getInstance;
-import static org.apache.flink.runtime.executiongraph.ExecutionGraphTestUtils.getJobVertexNotExecuting;
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
-import org.apache.flink.runtime.deployment.TaskDeploymentDescriptor;
+import akka.actor.ActorRef;
+import akka.actor.ActorSystem;
+import akka.actor.Props;
+import akka.testkit.JavaTestKit;
+import akka.testkit.TestActorRef;
 import org.apache.flink.runtime.execution.ExecutionState;
 import org.apache.flink.runtime.instance.AllocatedSlot;
 import org.apache.flink.runtime.instance.Instance;
@@ -32,26 +36,39 @@ import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.jobmanager.scheduler.Scheduler;
 import org.apache.flink.runtime.jobmanager.scheduler.ScheduledUnit;
 import org.apache.flink.runtime.jobmanager.scheduler.SlotAllocationFuture;
-import org.apache.flink.runtime.protocols.TaskOperationProtocol;
 
+import org.apache.flink.runtime.testingUtils.TestingUtils;
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.mockito.Matchers;
 
 public class ExecutionVertexSchedulingTest {
+	private static ActorSystem system;
+
+	@BeforeClass
+	public static void setup(){
+		system = ActorSystem.create("TestingActorSystem", TestingUtils.testConfig());
+	}
+
+	@AfterClass
+	public static void teardown(){
+		JavaTestKit.shutdownActorSystem(system);
+		system = null;
+	}
 	
 	@Test
 	public void testSlotReleasedWhenScheduledImmediately() {
 		
 		try {
 			// a slot than cannot be deployed to
-			final TaskOperationProtocol taskManager = mock(TaskOperationProtocol.class);
-			final Instance instance = getInstance(taskManager);
+			final Instance instance = getInstance(ActorRef.noSender());
 			final AllocatedSlot slot = instance.allocateSlot(new JobID());
 			slot.cancel();
 			assertFalse(slot.isReleased());
 			
-			final ExecutionJobVertex ejv = getJobVertexNotExecuting(new JobVertexID());
+			final ExecutionJobVertex ejv = getExecutionVertex(new JobVertexID());
 			final ExecutionVertex vertex = new ExecutionVertex(ejv, 0, new IntermediateResult[0]);
 			
 			Scheduler scheduler = mock(Scheduler.class);
@@ -64,8 +81,6 @@ public class ExecutionVertexSchedulingTest {
 			// will have failed
 			assertEquals(ExecutionState.FAILED, vertex.getExecutionState());
 			assertTrue(slot.isReleased());
-			
-			verify(taskManager, times(0)).submitTask(Matchers.any(TaskDeploymentDescriptor.class));
 		}
 		catch (Exception e) {
 			e.printStackTrace();
@@ -78,15 +93,14 @@ public class ExecutionVertexSchedulingTest {
 
 		try {
 			// a slot than cannot be deployed to
-			final TaskOperationProtocol taskManager = mock(TaskOperationProtocol.class);
-			final Instance instance = getInstance(taskManager);
+			final Instance instance = getInstance(ActorRef.noSender());
 			final AllocatedSlot slot = instance.allocateSlot(new JobID());
 			slot.cancel();
 			assertFalse(slot.isReleased());
 			
 			final SlotAllocationFuture future = new SlotAllocationFuture();
 			
-			final ExecutionJobVertex ejv = getJobVertexNotExecuting(new JobVertexID());
+			final ExecutionJobVertex ejv = getExecutionVertex(new JobVertexID());
 			final ExecutionVertex vertex = new ExecutionVertex(ejv, 0, new IntermediateResult[0]);
 			
 			Scheduler scheduler = mock(Scheduler.class);
@@ -104,8 +118,6 @@ public class ExecutionVertexSchedulingTest {
 			// will have failed
 			assertEquals(ExecutionState.FAILED, vertex.getExecutionState());
 			assertTrue(slot.isReleased());
-			
-			verify(taskManager, times(0)).submitTask(Matchers.any(TaskDeploymentDescriptor.class));
 		}
 		catch (Exception e) {
 			e.printStackTrace();
@@ -114,14 +126,16 @@ public class ExecutionVertexSchedulingTest {
 	}
 	
 	@Test
-	public void testScheduleToDeploy() {
+	public void testScheduleToRunning() {
 		try {
-			// a slot than cannot be deployed to
-			final TaskOperationProtocol taskManager = mock(TaskOperationProtocol.class);
-			final Instance instance = getInstance(taskManager);
+			TestingUtils.setCallingThreadDispatcher(system);
+			ActorRef tm = TestActorRef.create(system, Props.create(ExecutionGraphTestUtils
+					.SimpleAcknowledgingTaskManager.class));
+
+			final Instance instance = getInstance(tm);
 			final AllocatedSlot slot = instance.allocateSlot(new JobID());
 			
-			final ExecutionJobVertex ejv = getJobVertexNotExecuting(new JobVertexID());
+			final ExecutionJobVertex ejv = getExecutionVertex(new JobVertexID());
 			final ExecutionVertex vertex = new ExecutionVertex(ejv, 0, new IntermediateResult[0]);
 			
 			Scheduler scheduler = mock(Scheduler.class);
@@ -131,11 +145,13 @@ public class ExecutionVertexSchedulingTest {
 
 			// try to deploy to the slot
 			vertex.scheduleForExecution(scheduler, false);
-			assertEquals(ExecutionState.DEPLOYING, vertex.getExecutionState());
+			assertEquals(ExecutionState.RUNNING, vertex.getExecutionState());
 		}
 		catch (Exception e) {
 			e.printStackTrace();
 			fail(e.getMessage());
+		}finally{
+			TestingUtils.setGlobalExecutionContext();
 		}
 	}
 }

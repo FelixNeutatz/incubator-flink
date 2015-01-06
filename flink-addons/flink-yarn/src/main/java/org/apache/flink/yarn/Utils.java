@@ -121,7 +121,7 @@ public class Utils {
 		// chain-in a new classloader
 		URL fileUrl = null;
 		try {
-			fileUrl = path.toURL();
+			fileUrl = path.toURI().toURL();
 		} catch (MalformedURLException e) {
 			throw new RuntimeException("Erroneous config file path", e);
 		}
@@ -212,7 +212,7 @@ public class Utils {
 		localResource.setSize(jarStat.getLen());
 		localResource.setTimestamp(jarStat.getModificationTime());
 		localResource.setType(LocalResourceType.FILE);
-		localResource.setVisibility(LocalResourceVisibility.PUBLIC);
+		localResource.setVisibility(LocalResourceVisibility.APPLICATION);
 	}
 
 	public static void setTokensFor(ContainerLaunchContext amContainer, Path[] paths, Configuration conf) throws IOException {

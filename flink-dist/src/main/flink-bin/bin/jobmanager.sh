@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 ################################################################################
 #  Licensed to the Apache Software Foundation (ASF) under one
 #  or more contributor license agreements.  See the NOTICE file
@@ -30,7 +30,11 @@ if [ "$EXECUTIONMODE" = "local" ]; then
     FLINK_JM_HEAP=`expr $FLINK_JM_HEAP + $FLINK_TM_HEAP`
 fi
 
-JVM_ARGS="$JVM_ARGS -XX:+UseConcMarkSweepGC -XX:+CMSClassUnloadingEnabled -XX:MaxPermSize=256m"
+JAVA_VERSION=$($JAVA_RUN -version 2>&1 | sed 's/java version "\(.*\)\.\(.*\)\..*"/\1\2/; 1q')
+
+if [ "$JAVA_VERSION" -lt 18 ]; then
+    JVM_ARGS="$JVM_ARGS -XX:MaxPermSize=256m"
+fi
 
 if [ "$FLINK_JM_HEAP" -gt 0 ]; then
     JVM_ARGS="$JVM_ARGS -Xms"$FLINK_JM_HEAP"m -Xmx"$FLINK_JM_HEAP"m"
@@ -40,7 +44,7 @@ if [ "$FLINK_IDENT_STRING" = "" ]; then
     FLINK_IDENT_STRING="$USER"
 fi
 
-# auxilliary function to construct a the classpath for the jobmanager
+# auxilliary function to construct a the classpath for the jobManager
 constructJobManagerClassPath() {
     for jarfile in "$FLINK_LIB_DIR"/*.jar ; do
         if [[ $FLINK_JM_CLASSPATH = "" ]]; then
@@ -55,9 +59,9 @@ constructJobManagerClassPath() {
 
 FLINK_JM_CLASSPATH=`manglePathList "$(constructJobManagerClassPath)"`
 
-log=$FLINK_LOG_DIR/flink-$FLINK_IDENT_STRING-jobmanager-$HOSTNAME.log
-out=$FLINK_LOG_DIR/flink-$FLINK_IDENT_STRING-jobmanager-$HOSTNAME.out
-pid=$FLINK_PID_DIR/flink-$FLINK_IDENT_STRING-jobmanager.pid
+log=$FLINK_LOG_DIR/flink-$FLINK_IDENT_STRING-jobManager-$HOSTNAME.log
+out=$FLINK_LOG_DIR/flink-$FLINK_IDENT_STRING-jobManager-$HOSTNAME.out
+pid=$FLINK_PID_DIR/flink-$FLINK_IDENT_STRING-jobManager.pid
 log_setting=(-Dlog.file="$log" -Dlog4j.configuration=file:"$FLINK_CONF_DIR"/log4j.properties -Dlogback.configurationFile=file:"$FLINK_CONF_DIR"/logback.xml)
 
 case $STARTSTOP in
@@ -76,7 +80,7 @@ case $STARTSTOP in
         rotateLogFile $out
 
         echo Starting job manager
-        $JAVA_RUN $JVM_ARGS ${FLINK_ENV_JAVA_OPTS} "${log_setting[@]}" -classpath "$FLINK_JM_CLASSPATH" org.apache.flink.runtime.jobmanager.JobManager -executionMode $EXECUTIONMODE -configDir "$FLINK_CONF_DIR"  > "$out" 2>&1 < /dev/null &
+        $JAVA_RUN $JVM_ARGS ${FLINK_ENV_JAVA_OPTS} "${log_setting[@]}" -classpath "$FLINK_JM_CLASSPATH" org.apache.flink.runtime.jobmanager.JobManager --executionMode $EXECUTIONMODE --configDir "$FLINK_CONF_DIR"  > "$out" 2>&1 < /dev/null &
         echo $! > $pid
     ;;
 

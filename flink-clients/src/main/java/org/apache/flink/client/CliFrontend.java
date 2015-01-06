@@ -33,7 +33,10 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.TimeUnit;
 
+import akka.actor.ActorRef;
+import akka.actor.ActorSystem;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
 import org.apache.commons.cli.HelpFormatter;
@@ -52,13 +55,16 @@ import org.apache.flink.client.program.ProgramInvocationException;
 import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.GlobalConfiguration;
-import org.apache.flink.runtime.event.job.RecentJobEvent;
-import org.apache.flink.runtime.ipc.RPC;
+import org.apache.flink.runtime.akka.AkkaUtils;
+import org.apache.flink.runtime.executiongraph.ExecutionGraph;
 import org.apache.flink.runtime.jobgraph.JobID;
 import org.apache.flink.runtime.jobgraph.JobStatus;
-import org.apache.flink.runtime.net.NetUtils;
-import org.apache.flink.runtime.protocols.ExtendedManagementProtocol;
+import org.apache.flink.runtime.jobmanager.JobManager;
+import org.apache.flink.runtime.messages.JobManagerMessages.CancelJob;
+import org.apache.flink.runtime.messages.JobManagerMessages.RequestRunningJobs$;
+import org.apache.flink.runtime.messages.JobManagerMessages.RunningJobs;
 import org.apache.flink.util.StringUtils;
+import scala.concurrent.duration.FiniteDuration;
 
 /**
  * Implementation of a simple command line fronted for executing programs.
@@ -84,7 +90,6 @@ public class CliFrontend {
 	private static final Option ADDRESS_OPTION = new Option("m", "jobmanager", true, "Address of the JobManager (master) to which to connect. Use this flag to connect to a different JobManager than the one specified in the configuration.");
 	
 	// info specific options
-	private static final Option DESCR_OPTION = new Option("d", "description", false, "Show description of expected program arguments");
 	private static final Option PLAN_OPTION = new Option("e", "executionplan", false, "Show optimized execution plan of the program (JSON)");
 	
 	// list specific options
@@ -166,8 +171,7 @@ public class CliFrontend {
 		ARGS_OPTION.setArgs(Option.UNLIMITED_VALUES);
 		
 		PLAN_OPTION.setRequired(false);
-		DESCR_OPTION.setRequired(false);
-		
+
 		RUNNING_OPTION.setRequired(false);
 		SCHEDULED_OPTION.setRequired(false);
 		
@@ -227,7 +231,6 @@ public class CliFrontend {
 	static Options getInfoOptions(Options options) {
 		options = getProgramSpecificOptions(options);
 		options = getJobManagerAddressOption(options);
-		options.addOption(DESCR_OPTION);
 		options.addOption(PLAN_OPTION);
 		return options;
 	}
@@ -235,7 +238,6 @@ public class CliFrontend {
 	static Options getInfoOptionsWithoutDeprecatedOptions(Options options) {
 		options = getProgramSpecificOptionsWithoutDeprecatedOptions(options);
 		options = getJobManagerAddressOption(options);
-		options.addOption(DESCR_OPTION);
 		options.addOption(PLAN_OPTION);
 		return options;
 	}
@@ -276,7 +278,7 @@ public class CliFrontend {
 		// Parse command line options
 		CommandLine line;
 		try {
-			line = parser.parse(RUN_OPTIONS, args, false);
+			line = parser.parse(RUN_OPTIONS, args, true);
 			evaluateGeneralOptions(line);
 		}
 		catch (MissingOptionException e) {
@@ -398,10 +400,9 @@ public class CliFrontend {
 			return 0;
 		}
 		
-		boolean description = line.hasOption(DESCR_OPTION.getOpt());
 		boolean plan = line.hasOption(PLAN_OPTION.getOpt());
 		
-		if (!description && !plan) {
+		if (!plan) {
 			System.out.println("ERROR: Specify the information to display.");
 			printHelpForInfo();
 			return 1;
@@ -440,19 +441,6 @@ public class CliFrontend {
 		}
 		
 		try {
-			// check for description request
-			if (description) {
-				String descr = program.getDescription();
-				
-				if (descr != null) {
-					System.out.println("-------------------- Program Description ---------------------");
-					System.out.println(descr);
-					System.out.println("--------------------------------------------------------------");
-				} else {
-					System.out.println("No description available for this program.");
-				}
-			}
-			
 			// check for json plan request
 			if (plan) {
 				Client client = getClient(line, program.getUserCodeClassLoader());
@@ -517,41 +505,42 @@ public class CliFrontend {
 			return 1;
 		}
 		
-		ExtendedManagementProtocol jmConn = null;
 		try {
-			jmConn = getJobManagerConnection(line);
-			if (jmConn == null) {
+			ActorRef jobManager = getJobManager(line);
+			if (jobManager == null) {
 				printHelpForList();
 				return 1;
 			}
-			
-			List<RecentJobEvent> recentJobs = jmConn.getRecentJobs();
-			
-			ArrayList<RecentJobEvent> runningJobs = null;
-			ArrayList<RecentJobEvent> scheduledJobs = null;
+
+			Iterable<ExecutionGraph> jobs = AkkaUtils.<RunningJobs>ask(jobManager,
+					RequestRunningJobs$.MODULE$, getAkkaTimeout()).asJavaIterable();
+
+			ArrayList<ExecutionGraph> runningJobs = null;
+			ArrayList<ExecutionGraph> scheduledJobs = null;
 			if (running) {
-				runningJobs = new ArrayList<RecentJobEvent>();
+				runningJobs = new ArrayList<ExecutionGraph>();
 			}
 			if (scheduled) {
-				scheduledJobs = new ArrayList<RecentJobEvent>();
+				scheduledJobs = new ArrayList<ExecutionGraph>();
 			}
 			
-			for (RecentJobEvent rje : recentJobs) {
+			for (ExecutionGraph rj : jobs) {
 				
-				if (running && rje.getJobStatus().equals(JobStatus.RUNNING)) {
-					runningJobs.add(rje);
+				if (running && rj.getState().equals(JobStatus.RUNNING)) {
+					runningJobs.add(rj);
 				}
-				if (scheduled && rje.getJobStatus().equals(JobStatus.CREATED)) {
-					scheduledJobs.add(rje);
+				if (scheduled && rj.getState().equals(JobStatus.CREATED)) {
+					scheduledJobs.add(rj);
 				}
 			}
 			
 			SimpleDateFormat df = new SimpleDateFormat("dd.MM.yyyy HH:mm:ss");
-			Comparator<RecentJobEvent> njec = new Comparator<RecentJobEvent>(){
+			Comparator<ExecutionGraph> njec = new Comparator<ExecutionGraph>(){
 				
 				@Override
-				public int compare(RecentJobEvent o1, RecentJobEvent o2) {
-					return (int)(o1.getTimestamp()-o2.getTimestamp());
+				public int compare(ExecutionGraph o1, ExecutionGraph o2) {
+					return (int)(o1.getStatusTimestamp(o1.getState())-o2.getStatusTimestamp(o2
+							.getState()));
 				}
 			};
 			
@@ -562,8 +551,9 @@ public class CliFrontend {
 					Collections.sort(runningJobs, njec);
 					
 					System.out.println("------------------------ Running Jobs ------------------------");
-					for(RecentJobEvent je : runningJobs) {
-						System.out.println(df.format(new Date(je.getTimestamp()))+" : "+je.getJobID().toString()+" : "+je.getJobName());
+					for(ExecutionGraph rj : runningJobs) {
+						System.out.println(df.format(new Date(rj.getStatusTimestamp(rj.getState())))
+								+" : "+rj.getJobID().toString()+" : "+rj.getJobName());
 					}
 					System.out.println("--------------------------------------------------------------");
 				}
@@ -575,8 +565,9 @@ public class CliFrontend {
 					Collections.sort(scheduledJobs, njec);
 					
 					System.out.println("----------------------- Scheduled Jobs -----------------------");
-					for(RecentJobEvent je : scheduledJobs) {
-						System.out.println(df.format(new Date(je.getTimestamp()))+" : "+je.getJobID().toString()+" : "+je.getJobName());
+					for(ExecutionGraph rj : scheduledJobs) {
+						System.out.println(df.format(new Date(rj.getStatusTimestamp(rj.getState())))
+								+" : "+rj.getJobID().toString()+" : "+rj.getJobName());
 					}
 					System.out.println("--------------------------------------------------------------");
 				}
@@ -586,17 +577,6 @@ public class CliFrontend {
 		catch (Throwable t) {
 			return handleError(t);
 		}
-		finally {
-			if (jmConn != null) {
-				try {
-					RPC.stopProxy(jmConn);
-				} catch (Throwable t) {
-					System.out.println("Could not cleanly shut down connection from compiler to job manager");
-				}
-			}
-			jmConn = null;
-		}
-		
 	}
 	
 	/**
@@ -646,29 +626,19 @@ public class CliFrontend {
 			return 1;
 		}
 		
-		ExtendedManagementProtocol jmConn = null;
 		try {
-			jmConn = getJobManagerConnection(line);
-			if (jmConn == null) {
+			ActorRef jobManager = getJobManager(line);
+
+			if (jobManager == null) {
 				printHelpForCancel();
 				return 1;
 			}
-			
-			jmConn.cancelJob(jobId);
+
+			AkkaUtils.ask(jobManager, new CancelJob(jobId), getAkkaTimeout());
 			return 0;
 		}
 		catch (Throwable t) {
 			return handleError(t);
-		}
-		finally {
-			if (jmConn != null) {
-				try {
-					RPC.stopProxy(jmConn);
-				} catch (Throwable t) {
-					System.out.println("Warning: Could not cleanly shut down connection to the JobManager.");
-				}
-			}
-			jmConn = null;
 		}
 	}
 
@@ -781,17 +751,15 @@ public class CliFrontend {
 		}
 	}
 	
-	protected ExtendedManagementProtocol getJobManagerConnection(CommandLine line) throws IOException {
+	protected ActorRef getJobManager(CommandLine line) throws IOException {
 		InetSocketAddress jobManagerAddress = getJobManagerAddress(line);
 		if (jobManagerAddress == null) {
 			return null;
 		}
-		
-		String address = jobManagerAddress.getAddress().getHostAddress();
-		int port = jobManagerAddress.getPort();
-		
-		return RPC.getProxy(ExtendedManagementProtocol.class, 
-				new InetSocketAddress(address, port), NetUtils.getSocketFactory());
+
+		return JobManager.getJobManager(jobManagerAddress,
+				ActorSystem.create("CliFrontendActorSystem", AkkaUtils
+						.getDefaultActorSystemConfig()),getAkkaTimeout());
 	}
 	
 	
@@ -849,6 +817,13 @@ public class CliFrontend {
 			globalConfigurationLoaded = true;
 		}
 		return GlobalConfiguration.getConfiguration();
+	}
+
+	protected FiniteDuration getAkkaTimeout(){
+		Configuration config = getGlobalConfiguration();
+
+		return new FiniteDuration(config.getInteger(ConfigConstants.AKKA_ASK_TIMEOUT,
+				ConfigConstants.DEFAULT_AKKA_ASK_TIMEOUT), TimeUnit.SECONDS);
 	}
 	
 	public static List<Tuple2<String, String>> getDynamicProperties(String dynamicPropertiesEncoded) {

@@ -25,7 +25,7 @@ import static org.junit.Assert.fail;
 import java.io.IOException;
 
 import org.apache.flink.runtime.io.network.channels.ChannelID;
-import org.apache.flink.runtime.testutils.ServerTestUtils;
+import org.apache.flink.runtime.testutils.CommonTestUtils;
 import org.apache.flink.util.StringUtils;
 import org.junit.Test;
 
@@ -97,7 +97,8 @@ public class ChannelDeploymentDescriptorTest {
 		ChannelDeploymentDescriptor copy = null;
 
 		try {
-			copy = ServerTestUtils.createCopy(orig);
+
+			copy = CommonTestUtils.createCopySerializable(orig);
 		} catch (IOException ioe) {
 			fail(StringUtils.stringifyException(ioe));
 		}

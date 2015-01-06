@@ -25,9 +25,11 @@ import java.util.Iterator;
 import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Callable;
 import java.util.concurrent.LinkedBlockingQueue;
 
+import akka.dispatch.Futures;
+import org.apache.flink.runtime.akka.AkkaUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.flink.runtime.executiongraph.ExecutionVertex;
@@ -41,15 +43,12 @@ import org.apache.flink.util.ExceptionUtils;
  * The scheduler is responsible for distributing the ready-to-run tasks and assigning them to instances and
  * slots.
  */
-public class Scheduler implements InstanceListener, SlotAvailablilityListener {
+public class Scheduler implements InstanceListener, SlotAvailabilityListener {
 
 	static final Logger LOG = LoggerFactory.getLogger(Scheduler.class);
 	
 	
 	private final Object globalLock = new Object();
-	
-	private final ExecutorService executor;
-	
 	
 	/** All instances that the scheduler can deploy to */
 	private final Set<Instance> allInstances = new HashSet<Instance>();
@@ -69,13 +68,7 @@ public class Scheduler implements InstanceListener, SlotAvailablilityListener {
 	
 	private int nonLocalizedAssignments;
 	
-	
 	public Scheduler() {
-		this(null);
-	}
-	
-	public Scheduler(ExecutorService executorService) {
-		this.executor = executorService;
 		this.newlyAvailableInstances = new LinkedBlockingQueue<Instance>();
 	}
 	
@@ -217,7 +210,7 @@ public class Scheduler implements InstanceListener, SlotAvailablilityListener {
 						if (slotFromGroup == null) {
 							// both null
 							if (constraint == null || constraint.isUnassigned()) {
-								throw new NoResourceAvailableException(getNumberOfAvailableInstances(), getTotalNumberOfSlots());
+								throw new NoResourceAvailableException(task, getNumberOfAvailableInstances(), getTotalNumberOfSlots());
 							} else {
 								throw new NoResourceAvailableException("Could not allocate a slot on instance " + 
 											constraint.getLocation() + ", as required by the co-location constraint.");
@@ -395,19 +388,14 @@ public class Scheduler implements InstanceListener, SlotAvailablilityListener {
 		// that leads with a high probability to deadlocks, when scheduling fast
 		
 		this.newlyAvailableInstances.add(instance);
-		
-		if (this.executor != null) {
-			this.executor.execute(new Runnable() {
-				@Override
-				public void run() {
-					handleNewSlot();
-				}
-			});
-		}
-		else {
-			// for tests, we use the synchronous variant
-			handleNewSlot();
-		}
+
+		Futures.future(new Callable<Object>() {
+			@Override
+			public Object call() throws Exception {
+				handleNewSlot();
+				return null;
+			}
+		}, AkkaUtils.globalExecutionContext());
 	}
 	
 	private void handleNewSlot() {

@@ -19,32 +19,32 @@ package org.apache.flink.streaming.connectors.rabbitmq;
 
 import java.io.IOException;
 
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.api.function.sink.RichSinkFunction;
+import org.apache.flink.streaming.connectors.util.SerializationSchema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.apache.flink.streaming.api.function.sink.SinkFunction;
 
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
 
-public abstract class RMQSink<IN> implements SinkFunction<IN> {
+public class RMQSink<IN> extends RichSinkFunction<IN> {
 	private static final long serialVersionUID = 1L;
 
 	private static final Logger LOG = LoggerFactory.getLogger(RMQSink.class);
-
-	private boolean sendAndClose = false;
-	private boolean closeWithoutSend = false;
 
 	private String QUEUE_NAME;
 	private String HOST_NAME;
 	private transient ConnectionFactory factory;
 	private transient Connection connection;
 	private transient Channel channel;
-	private boolean initDone = false;
+	private SerializationSchema<IN, byte[]> scheme;
 
-	public RMQSink(String HOST_NAME, String QUEUE_NAME) {
+	public RMQSink(String HOST_NAME, String QUEUE_NAME, SerializationSchema<IN, byte[]> schema) {
 		this.HOST_NAME = HOST_NAME;
 		this.QUEUE_NAME = QUEUE_NAME;
+		this.scheme = schema;
 	}
 
 	/**
@@ -56,12 +56,11 @@ public abstract class RMQSink<IN> implements SinkFunction<IN> {
 		try {
 			connection = factory.newConnection();
 			channel = connection.createChannel();
+			channel.queueDeclare(QUEUE_NAME, false, false, false, null);
 
 		} catch (IOException e) {
 			throw new RuntimeException(e);
 		}
-
-		initDone = true;
 	}
 
 	/**
@@ -72,35 +71,18 @@ public abstract class RMQSink<IN> implements SinkFunction<IN> {
 	 */
 	@Override
 	public void invoke(IN value) {
-		if (!initDone) {
-			initializeConnection();
-		}
-
 		try {
-			channel.queueDeclare(QUEUE_NAME, false, false, false, null);
-			byte[] msg = serialize(value);
-			if (!closeWithoutSend) {
-				channel.basicPublish("", QUEUE_NAME, null, msg);
-			}
+			byte[] msg = scheme.serialize(value);
+
+			channel.basicPublish("", QUEUE_NAME, null, msg);
+
 		} catch (IOException e) {
 			if (LOG.isErrorEnabled()) {
 				LOG.error("Cannot send RMQ message {} at {}", QUEUE_NAME, HOST_NAME);
 			}
 		}
 
-		if (sendAndClose) {
-			closeChannel();
-		}
 	}
-
-	/**
-	 * Serializes tuples into byte arrays.
-	 * 
-	 * @param value
-	 *            The tuple used for the serialization
-	 * @return The serialized byte array.
-	 */
-	public abstract byte[] serialize(IN value);
 
 	/**
 	 * Closes the connection.
@@ -110,25 +92,20 @@ public abstract class RMQSink<IN> implements SinkFunction<IN> {
 			channel.close();
 			connection.close();
 		} catch (IOException e) {
-			throw new RuntimeException("Error while closing RMQ connection with " + QUEUE_NAME + " at "
-					+ HOST_NAME, e);
+			throw new RuntimeException("Error while closing RMQ connection with " + QUEUE_NAME
+					+ " at " + HOST_NAME, e);
 		}
 
 	}
 
-	/**
-	 * Closes the connection immediately and no further data will be sent.
-	 */
-	public void closeWithoutSend() {
-		closeChannel();
-		closeWithoutSend = true;
+	@Override
+	public void open(Configuration config) {
+		initializeConnection();
 	}
 
-	/**
-	 * Closes the connection only when the next message is sent after this call.
-	 */
-	public void sendAndClose() {
-		sendAndClose = true;
+	@Override
+	public void close() {
+		closeChannel();
 	}
 
 }

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -27,7 +27,7 @@ import scala.collection.generic.CanBuildFrom
  */
 abstract class TraversableTypeInfo[T <: TraversableOnce[E], E](
     clazz: Class[T],
-    elementTypeInfo: TypeInformation[E])
+    val elementTypeInfo: TypeInformation[E])
   extends TypeInformation[T] {
 
   override def isBasicType: Boolean = false
@@ -39,5 +39,14 @@ abstract class TraversableTypeInfo[T <: TraversableOnce[E], E](
 
   def createSerializer(): TypeSerializer[T]
 
-  override def toString = s"Collection[$elementTypeInfo]"
+  override def equals(other: Any): Boolean = {
+    if (other.isInstanceOf[TraversableTypeInfo[_, _]]) {
+      val otherTrav = other.asInstanceOf[TraversableTypeInfo[_, _]]
+      otherTrav.getTypeClass == getTypeClass && otherTrav.elementTypeInfo == elementTypeInfo
+    } else {
+      false
+    }
+  }
+
+  override def toString = s"$clazz[$elementTypeInfo]"
 }

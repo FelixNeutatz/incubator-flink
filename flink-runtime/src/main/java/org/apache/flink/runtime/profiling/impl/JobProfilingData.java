@@ -28,7 +28,6 @@ import org.apache.flink.runtime.executiongraph.ExecutionGraph;
 import org.apache.flink.runtime.executiongraph.ExecutionVertex;
 import org.apache.flink.runtime.instance.AllocatedSlot;
 import org.apache.flink.runtime.instance.Instance;
-import org.apache.flink.runtime.instance.InstanceConnectionInfo;
 import org.apache.flink.runtime.profiling.impl.types.InternalInstanceProfilingData;
 import org.apache.flink.runtime.profiling.types.InstanceSummaryProfilingEvent;
 
@@ -39,7 +38,8 @@ public class JobProfilingData {
 
 	private final long profilingStart;
 
-	private final Map<InstanceConnectionInfo, InternalInstanceProfilingData> collectedInstanceProfilingData = new HashMap<InstanceConnectionInfo, InternalInstanceProfilingData>();
+	private final Map<String, InternalInstanceProfilingData> collectedInstanceProfilingData = new
+			HashMap<String, InternalInstanceProfilingData>();
 
 	
 	public JobProfilingData(ExecutionGraph executionGraph) {
@@ -60,10 +60,10 @@ public class JobProfilingData {
 
 		for (ExecutionVertex executionVertex : this.executionGraph.getAllExecutionVertices()) {
 			AllocatedSlot slot = executionVertex.getCurrentAssignedResource();
-			if (slot != null && slot.getInstance().getInstanceConnectionInfo().equals(
-					instanceProfilingData.getInstanceConnectionInfo()))
+			if (slot != null && slot.getInstance().getPath().equals(
+					instanceProfilingData.getInstancePath()))
 			{
-				this.collectedInstanceProfilingData.put(instanceProfilingData.getInstanceConnectionInfo(), instanceProfilingData);
+				this.collectedInstanceProfilingData.put(instanceProfilingData.getInstancePath(), instanceProfilingData);
 				return true;
 			}
 		}
@@ -95,7 +95,7 @@ public class JobProfilingData {
 
 		final int numberOfInstances = this.collectedInstanceProfilingData.size();
 		
-		final Iterator<InstanceConnectionInfo> instanceIterator = this.collectedInstanceProfilingData.keySet().iterator();
+		final Iterator<String> instanceIterator = this.collectedInstanceProfilingData.keySet().iterator();
 
 		long freeMemorySum = 0;
 		long totalMemorySum = 0;

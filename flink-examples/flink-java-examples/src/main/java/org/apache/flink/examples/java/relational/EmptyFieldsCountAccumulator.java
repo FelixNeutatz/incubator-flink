@@ -18,6 +18,8 @@
 package org.apache.flink.examples.java.relational;
 
 import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -30,9 +32,6 @@ import org.apache.flink.api.common.functions.RichFilterFunction;
 import org.apache.flink.api.java.tuple.Tuple;
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.memory.DataInputView;
-import org.apache.flink.core.memory.DataOutputView;
-
 
 /**
  * This program filters lines from a CSV file with empty fields. In doing so, it counts the number of empty fields per
@@ -190,10 +189,18 @@ public class EmptyFieldsCountAccumulator {
 	 * increase the <i>n</i>-th vector component by 1, whereat <i>n</i> is the methods parameter. The size of the vector
 	 * is automatically managed.
 	 */
-	public static class VectorAccumulator implements Accumulator<Integer, List<Integer>> {
+	public static class VectorAccumulator implements Accumulator<Integer, ArrayList<Integer>> {
 
 		/** Stores the accumulated vector components. */
-		private final List<Integer> resultVector = new ArrayList<Integer>();
+		private final ArrayList<Integer> resultVector;
+
+		public VectorAccumulator(){
+			this(new ArrayList<Integer>());
+		}
+
+		public VectorAccumulator(ArrayList<Integer> resultVector){
+			this.resultVector = resultVector;
+		}
 
 		/**
 		 * Increases the result vector component at the specified position by 1.
@@ -218,7 +225,7 @@ public class EmptyFieldsCountAccumulator {
 		}
 
 		@Override
-		public List<Integer> getLocalValue() {
+		public ArrayList<Integer> getLocalValue() {
 			return this.resultVector;
 		}
 
@@ -229,7 +236,7 @@ public class EmptyFieldsCountAccumulator {
 		}
 
 		@Override
-		public void merge(final Accumulator<Integer, List<Integer>> other) {
+		public void merge(final Accumulator<Integer, ArrayList<Integer>> other) {
 			// merge two vector accumulators by adding their up their vector components
 			final List<Integer> otherVector = other.getLocalValue();
 			for (int index = 0; index < otherVector.size(); index++) {
@@ -238,7 +245,7 @@ public class EmptyFieldsCountAccumulator {
 		}
 
 		@Override
-		public void write(final DataOutputView out) throws IOException {
+		public void write(final ObjectOutputStream out) throws IOException {
 			// binary serialization of the result vector:
 			// [number of components, component 0, component 1, ...]
 			out.writeInt(this.resultVector.size());
@@ -248,13 +255,20 @@ public class EmptyFieldsCountAccumulator {
 		}
 
 		@Override
-		public void read(final DataInputView in) throws IOException {
+		public void read(final ObjectInputStream in) throws IOException {
 			// binary deserialization of the result vector
 			final int size = in.readInt();
 			for (int numReadComponents = 0; numReadComponents < size; numReadComponents++) {
 				final int component = in.readInt();
 				this.resultVector.add(component);
 			}
+		}
+
+		@Override
+		public Accumulator<Integer, ArrayList<Integer>> clone() {
+			VectorAccumulator result = new VectorAccumulator(new ArrayList<Integer>(resultVector));
+
+			return result;
 		}
 
 	}

@@ -19,8 +19,7 @@
 package org.apache.flink.runtime.jobgraph;
 
 import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
+import java.io.Serializable;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -29,30 +28,27 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.apache.flink.api.common.InvalidProgramException;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FSDataInputStream;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.core.io.IOReadableWritable;
-import org.apache.flink.core.memory.DataInputView;
-import org.apache.flink.core.memory.DataInputViewStream;
-import org.apache.flink.core.memory.DataOutputView;
-import org.apache.flink.core.memory.DataOutputViewStream;
 import org.apache.flink.runtime.blob.BlobClient;
 import org.apache.flink.runtime.blob.BlobKey;
-import org.apache.flink.types.StringValue;
 
 /**
  * A job graph represents an entire Flink runtime job.
  */
-public class JobGraph implements IOReadableWritable {
+public class JobGraph implements Serializable {
 
+	private static final long serialVersionUID = 1L;
+	
 	// --------------------------------------------------------------------------------------------
 	// Members that define the structure / topology of the graph
 	// --------------------------------------------------------------------------------------------
-	
+
 	/** List of task vertices included in this job graph. */
 	private final Map<JobVertexID, AbstractJobVertex> taskVertices = new LinkedHashMap<JobVertexID, AbstractJobVertex>();
 
@@ -60,7 +56,7 @@ public class JobGraph implements IOReadableWritable {
 	private final Configuration jobConfiguration = new Configuration();
 
 	/** Set of JAR files required to run this job. */
-	private final transient List<Path> userJars = new ArrayList<Path>();
+	private final List<Path> userJars = new ArrayList<Path>();
 
 	/** Set of blob keys identifying the JAR files required to run this job. */
 	private final List<BlobKey> userJarBlobKeys = new ArrayList<BlobKey>();
@@ -102,7 +98,7 @@ public class JobGraph implements IOReadableWritable {
 	 * @param jobName The name of the job
 	 */
 	public JobGraph(JobID jobId, String jobName) {
-		this.jobID = jobId == null ? new JobID() : jobId;;
+		this.jobID = jobId == null ? new JobID() : jobId;
 		this.jobName = jobName == null ? "(unnamed job)" : jobName;
 	}
 	
@@ -266,8 +262,8 @@ public class JobGraph implements IOReadableWritable {
 			return Collections.emptyList();
 		}
 		
-		ArrayList<AbstractJobVertex> sorted = new ArrayList<AbstractJobVertex>(this.taskVertices.size());
-		LinkedHashSet<AbstractJobVertex> remaining = new LinkedHashSet<AbstractJobVertex>(this.taskVertices.values());
+		List<AbstractJobVertex> sorted = new ArrayList<AbstractJobVertex>(this.taskVertices.size());
+		Set<AbstractJobVertex> remaining = new LinkedHashSet<AbstractJobVertex>(this.taskVertices.values());
 		
 		// start by finding the vertices with no input edges
 		// and the ones with disconnected inputs (that refer to some standalone data set)
@@ -301,7 +297,7 @@ public class JobGraph implements IOReadableWritable {
 		return sorted;
 	}
 	
-	private void addNodesThatHaveNoNewPredecessors(AbstractJobVertex start, ArrayList<AbstractJobVertex> target, LinkedHashSet<AbstractJobVertex> remaining) {
+	private void addNodesThatHaveNoNewPredecessors(AbstractJobVertex start, List<AbstractJobVertex> target, Set<AbstractJobVertex> remaining) {
 		
 		// forward traverse over all produced data sets and all their consumers
 		for (IntermediateDataSet dataSet : start.getProducedDataSets()) {
@@ -336,100 +332,6 @@ public class JobGraph implements IOReadableWritable {
 			}
 		}
 	}
-	
-	// --------------------------------------------------------------------------------------------
-	//  Serialization / Deserialization
-	// --------------------------------------------------------------------------------------------
-	
-	@Override
-	public void read(DataInputView in) throws IOException {
-		// write the simple fields
-		this.jobID.read(in);
-		this.jobName = StringValue.readString(in);
-		this.jobConfiguration.read(in);
-		this.numExecutionRetries = in.readInt();
-		this.allowQueuedScheduling = in.readBoolean();
-		
-		final int numVertices = in.readInt();
-		
-		@SuppressWarnings("resource")
-		ObjectInputStream ois = new ObjectInputStream(new DataInputViewStream(in));
-		for (int i = 0; i < numVertices; i++) {
-			try {
-				AbstractJobVertex vertex = (AbstractJobVertex) ois.readObject();
-				taskVertices.put(vertex.getID(), vertex);
-			}
-			catch (ClassNotFoundException e) {
-				throw new IOException(e);
-			}
-		}
-		ois.close();
-
-		// Read required jar files
-		readJarBlobKeys(in);
-	}
-
-
-	@Override
-	public void write(DataOutputView out) throws IOException {
-		
-		// write the simple fields
-		this.jobID.write(out);
-		StringValue.writeString(this.jobName, out);
-		this.jobConfiguration.write(out);
-		out.writeInt(numExecutionRetries);
-		out.writeBoolean(allowQueuedScheduling);
-		
-		// write the task vertices using java serialization (to resolve references in the object graph)
-		out.writeInt(taskVertices.size());
-		
-		ObjectOutputStream oos = new ObjectOutputStream(new DataOutputViewStream(out));
-		for (AbstractJobVertex vertex : this.taskVertices.values()) {
-			oos.writeObject(vertex);
-		}
-		oos.close();
-		
-		// Write out all required jar files
-		writeJarBlobKeys(out);
-	}
-
-	/**
-	 * Writes the BLOB keys of the jar files required to run this job to the given {@link org.apache.flink.core.memory.DataOutputView}.
-	 *
-	 * @param out
-	 *        the data output to write the BLOB keys to
-	 * @throws IOException
-	 *         thrown if an error occurs while writing to the data output
-	 */
-	private void writeJarBlobKeys(final DataOutputView out) throws IOException {
-
-		out.writeInt(this.userJarBlobKeys.size());
-
-		for (final Iterator<BlobKey> it = this.userJarBlobKeys.iterator(); it.hasNext();) {
-			it.next().write(out);
-		}
-	}
-
-	/**
-	 * Reads the BLOB keys for the JAR files required to run this job and registers them.
-	 *
-	 * @param in
-	 *        the data stream to read the BLOB keys from
-	 * @throws IOException
-	 *         thrown if an error occurs while reading the stream
-	 */
-	private void readJarBlobKeys(final DataInputView in) throws IOException {
-
-		// Do jar files follow;
-		final int numberOfBlobKeys = in.readInt();
-
-		for (int i = 0; i < numberOfBlobKeys; ++i) {
-			final BlobKey key = new BlobKey();
-			key.read(in);
-			this.userJarBlobKeys.add(key);
-		}
-	}
-
 
 	// --------------------------------------------------------------------------------------------
 	//  Handling of attached JAR files
@@ -457,7 +359,6 @@ public class JobGraph implements IOReadableWritable {
 	 * @return set of BLOB keys referring to the JAR files required to run this job
 	 */
 	public List<BlobKey> getUserJarBlobKeys() {
-
 		return this.userJarBlobKeys;
 	}
 
@@ -469,34 +370,32 @@ public class JobGraph implements IOReadableWritable {
 	 * @throws IOException
 	 *         thrown if an I/O error occurs during the upload
 	 */
-	public void uploadRequiredJarFiles(final InetSocketAddress serverAddress) throws IOException {
-
+	public void uploadRequiredJarFiles(InetSocketAddress serverAddress) throws IOException {
 		if (this.userJars.isEmpty()) {
 			return;
 		}
 
 		BlobClient bc = null;
 		try {
-
 			bc = new BlobClient(serverAddress);
 
-			for (final Iterator<Path> it = this.userJars.iterator(); it.hasNext();) {
+			for (final Path jar : this.userJars) {
 
-				final Path jar = it.next();
 				final FileSystem fs = jar.getFileSystem();
 				FSDataInputStream is = null;
 				try {
 					is = fs.open(jar);
 					final BlobKey key = bc.put(is);
 					this.userJarBlobKeys.add(key);
-				} finally {
+				}
+				finally {
 					if (is != null) {
 						is.close();
 					}
 				}
 			}
-
-		} finally {
+		}
+		finally {
 			if (bc != null) {
 				bc.close();
 			}

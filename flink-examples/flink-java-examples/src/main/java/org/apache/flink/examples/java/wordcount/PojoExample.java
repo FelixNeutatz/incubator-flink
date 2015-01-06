@@ -84,9 +84,9 @@ public class PojoExample {
 		DataSet<String> text = getTextDataSet(env);
 		
 		DataSet<Word> counts = 
-			// split up the lines in pairs (2-tuples) containing: (word,1)
+			// split up the lines into Word objects (with frequency = 1)
 			text.flatMap(new Tokenizer())
-			// group by the tuple field "0" and sum up tuple field "1"
+			// group by the field word and sum up the frequency
 			.groupBy("word")
 			.reduce(new ReduceFunction<Word>() {
 				@Override

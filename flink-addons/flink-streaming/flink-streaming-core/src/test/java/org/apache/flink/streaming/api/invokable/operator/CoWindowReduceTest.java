@@ -27,8 +27,8 @@ import java.util.List;
 
 import org.apache.flink.streaming.api.function.co.CoReduceFunction;
 import org.apache.flink.streaming.api.invokable.operator.co.CoWindowReduceInvokable;
-import org.apache.flink.streaming.api.invokable.util.TimeStamp;
-import org.apache.flink.streaming.util.MockCoInvokable;
+import org.apache.flink.streaming.api.windowing.helper.TimestampWrapper;
+import org.apache.flink.streaming.util.MockCoContext;
 import org.junit.Test;
 
 public class CoWindowReduceTest {
@@ -57,13 +57,14 @@ public class CoWindowReduceTest {
 		}
 	}
 
-	public static final class MyTimeStamp<T> implements TimeStamp<T> {
+	public static final class MyTimeStamp<T> extends TimestampWrapper<T> {
 		private static final long serialVersionUID = 1L;
 
 		private Iterator<Long> timestamps;
 		private long start;
 
 		public MyTimeStamp(List<Long> timestamps) {
+			super(null, 0);
 			this.timestamps = timestamps.iterator();
 			this.start = timestamps.get(0);
 		}
@@ -114,7 +115,7 @@ public class CoWindowReduceTest {
 		expected.add("abcde");
 		expected.add("fghi");
 
-		List<String> result = MockCoInvokable.createAndExecute(invokable, inputs, inputs2);
+		List<String> result = MockCoContext.createAndExecute(invokable, inputs, inputs2);
 
 		Collections.sort(result);
 		Collections.sort(expected);
@@ -160,7 +161,7 @@ public class CoWindowReduceTest {
 		expected.add("fgh");
 		expected.add("hi");
 
-		List<String> result = MockCoInvokable.createAndExecute(invokable, inputs, inputs2);
+		List<String> result = MockCoContext.createAndExecute(invokable, inputs, inputs2);
 
 		Collections.sort(result);
 		Collections.sort(expected);

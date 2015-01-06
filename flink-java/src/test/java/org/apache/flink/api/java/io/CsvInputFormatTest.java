@@ -19,17 +19,7 @@
 
 package org.apache.flink.api.java.io;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.io.OutputStreamWriter;
+import com.google.common.base.Charsets;
 
 import org.apache.flink.api.java.tuple.Tuple1;
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -38,7 +28,22 @@ import org.apache.flink.api.java.tuple.Tuple5;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FileInputSplit;
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.types.parser.FieldParser;
+import org.apache.flink.types.parser.StringParser;
 import org.junit.Test;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStreamWriter;
+
+import static org.hamcrest.CoreMatchers.is;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThat;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class CsvInputFormatTest {
 	
@@ -48,6 +53,143 @@ public class CsvInputFormatTest {
 	private static final String FIRST_PART = "That is the first part";
 	
 	private static final String SECOND_PART = "That is the second part";
+	
+	@Test
+	public void ignoreInvalidLines() {
+		try {
+			
+			
+			final String fileContent =  "#description of the data\n" + 
+										"header1|header2|header3|\n"+
+										"this is|1|2.0|\n"+
+										"//a comment\n" +
+										"a test|3|4.0|\n" +
+										"#next|5|6.0|\n";
+			
+			final FileInputSplit split = createTempFile(fileContent);
+			
+			CsvInputFormat<Tuple3<String, Integer, Double>> format = 
+					new CsvInputFormat<Tuple3<String, Integer, Double>>(PATH, "\n", '|',  String.class, Integer.class, Double.class);
+			format.setLenient(true);
+		
+			final Configuration parameters = new Configuration();
+			format.configure(parameters);
+			format.open(split);
+			
+			
+			Tuple3<String, Integer, Double> result = new Tuple3<String, Integer, Double>();
+			result = format.nextRecord(result);
+			assertNotNull(result);
+			assertEquals("this is", result.f0);
+			assertEquals(new Integer(1), result.f1);
+			assertEquals(new Double(2.0), result.f2);
+			
+			result = format.nextRecord(result);
+			assertNotNull(result);
+			assertEquals("a test", result.f0);
+			assertEquals(new Integer(3), result.f1);
+			assertEquals(new Double(4.0), result.f2);
+			
+			result = format.nextRecord(result);
+			assertNotNull(result);
+			assertEquals("#next", result.f0);
+			assertEquals(new Integer(5), result.f1);
+			assertEquals(new Double(6.0), result.f2);
+
+			result = format.nextRecord(result);
+			assertNull(result);
+		}
+		catch (Exception ex) {
+			ex.printStackTrace();
+			fail("Test failed due to a " + ex.getClass().getName() + ": " + ex.getMessage());
+		}
+	}
+	
+	@Test
+	public void ignoreSingleCharPrefixComments() {
+		try {
+			final String fileContent = "#description of the data\n" +
+									   "#successive commented line\n" +
+									   "this is|1|2.0|\n" +
+									   "a test|3|4.0|\n" +
+									   "#next|5|6.0|\n";
+			
+			final FileInputSplit split = createTempFile(fileContent);
+			
+			CsvInputFormat<Tuple3<String, Integer, Double>> format = 
+					new CsvInputFormat<Tuple3<String, Integer, Double>>(PATH, "\n", '|', String.class, Integer.class, Double.class);
+			format.setCommentPrefix("#");
+		
+			final Configuration parameters = new Configuration();
+			format.configure(parameters);
+			format.open(split);
+			
+			Tuple3<String, Integer, Double> result = new Tuple3<String, Integer, Double>();
+			
+			result = format.nextRecord(result);
+			assertNotNull(result);
+			assertEquals("this is", result.f0);
+			assertEquals(new Integer(1), result.f1);
+			assertEquals(new Double(2.0), result.f2);
+			
+			result = format.nextRecord(result);
+			assertNotNull(result);
+			assertEquals("a test", result.f0);
+			assertEquals(new Integer(3), result.f1);
+			assertEquals(new Double(4.0), result.f2);
+
+			result = format.nextRecord(result);
+			assertNull(result);
+		}
+		catch (Exception ex) {
+			ex.printStackTrace();
+			fail("Test failed due to a " + ex.getClass().getName() + ": " + ex.getMessage());
+		}
+	}
+	
+	@Test
+	public void ignoreMultiCharPrefixComments() {
+		try {
+			
+			
+			final String fileContent = "//description of the data\n" +
+									   "//successive commented line\n" +
+									   "this is|1|2.0|\n"+
+									   "a test|3|4.0|\n" +
+									   "//next|5|6.0|\n";
+			
+			final FileInputSplit split = createTempFile(fileContent);
+			
+			CsvInputFormat<Tuple3<String, Integer, Double>> format = 
+					new CsvInputFormat<Tuple3<String, Integer, Double>>(PATH, "\n", '|', String.class, Integer.class, Double.class);
+			format.setCommentPrefix("//");
+		
+			final Configuration parameters = new Configuration();
+			format.configure(parameters);
+			format.open(split);
+			
+			Tuple3<String, Integer, Double> result = new Tuple3<String, Integer, Double>();
+			
+			result = format.nextRecord(result);
+			assertNotNull(result);
+			assertEquals("this is", result.f0);
+			assertEquals(new Integer(1), result.f1);
+			assertEquals(new Double(2.0), result.f2);
+			
+			result = format.nextRecord(result);
+			assertNotNull(result);
+			assertEquals("a test", result.f0);
+			assertEquals(new Integer(3), result.f1);
+			assertEquals(new Double(4.0), result.f2);
+			
+			result = format.nextRecord(result);
+			assertNull(result);
+		}
+		catch (Exception ex) {
+			ex.printStackTrace();
+			fail("Test failed due to a " + ex.getClass().getName() + ": " + ex.getMessage());
+		}
+	}
 
 	@Test
 	public void readStringFields() {
@@ -345,12 +487,87 @@ public class CsvInputFormatTest {
 			fail("Test failed due to a " + ex.getClass().getName() + ": " + ex.getMessage());
 		}
 	}
-	
+
+	@Test
+	public void testParseStringErrors() throws Exception {
+		StringParser stringParser = new StringParser();
+
+		Object[][] failures = {
+				{"\"string\" trailing", FieldParser.ParseErrorState.UNQUOTED_CHARS_AFTER_QUOTED_STRING},
+				{"\"unterminated ", 		FieldParser.ParseErrorState.UNTERMINATED_QUOTED_STRING}
+		};
+
+		for (Object[] failure : failures) {
+			String input = (String) failure[0];
+
+			int result = stringParser.parseField(input.getBytes(), 0, input.length(), '|', null);
+
+			assertThat(result, is(-1));
+			assertThat(stringParser.getErrorState(), is(failure[1]));
+		}
+
+
+	}
+
+	@Test
+	public void testParserCorrectness() throws Exception {
+		// RFC 4180 Compliance Test content
+		// Taken from http://en.wikipedia.org/wiki/Comma-separated_values#Example
+		final String fileContent =
+				"Year,Make,Model,Description,Price\n" +
+				"1997,Ford,E350,\"ac, abs, moon\",3000.00\n" +
+				"1999,Chevy,\"Venture \"\"Extended Edition\"\"\",\"\",4900.00\n" +
+				"1996,Jeep,Grand Cherokee,\"MUST SELL! air, moon roof, loaded\",4799.00\n" +
+				"1999,Chevy,\"Venture \"\"Extended Edition, Very Large\"\"\",,5000.00\n" +
+				",,\"Venture \"\"Extended Edition\"\"\",\"\",4900.00";
+
+		final FileInputSplit split = createTempFile(fileContent);
+
+		final CsvInputFormat<Tuple5<Integer, String, String, String, Double>> format =
+				new CsvInputFormat<Tuple5<Integer, String, String, String, Double>>(PATH);
+
+		format.setSkipFirstLineAsHeader(true);
+		format.setFieldDelimiter(',');
+
+		format.setFields(new boolean[] { true, true, true, true, true }, new Class<?>[] {
+				Integer.class, String.class, String.class, String.class, Double.class });
+
+		format.configure(new Configuration());
+		format.open(split);
+
+		Tuple5<Integer, String, String, String, Double> result = new Tuple5<Integer, String, String, String, Double>();
+
+		@SuppressWarnings("unchecked")
+		Tuple5<Integer, String, String, String, Double>[] expectedLines = new Tuple5[] {
+				new Tuple5<Integer, String, String, String, Double>(1997, "Ford", "E350", "ac, abs, moon", 3000.0),
+				new Tuple5<Integer, String, String, String, Double>(1999, "Chevy", "Venture \"Extended Edition\"", "", 4900.0),
+				new Tuple5<Integer, String, String, String, Double>(1996, "Jeep", "Grand Cherokee", "MUST SELL! air, moon roof, loaded", 4799.00),
+				new Tuple5<Integer, String, String, String, Double>(1999, "Chevy", "Venture \"Extended Edition, Very Large\"", "", 5000.00	),
+				new Tuple5<Integer, String, String, String, Double>(0, "", "Venture \"Extended Edition\"", "", 4900.0)
+		};
+
+		try {
+			for (Tuple5<Integer, String, String, String, Double> expected : expectedLines) {
+				result = format.nextRecord(result);
+				assertEquals(expected, result);
+			}
+
+			assertNull(format.nextRecord(result));
+			assertTrue(format.reachedEnd());
+
+		} catch (Exception ex) {
+			fail("Test failed due to a " + ex.getClass().getName() + ": " + ex.getMessage());
+		}
+
+	}
+
 	private FileInputSplit createTempFile(String content) throws IOException {
 		File tempFile = File.createTempFile("test_contents", "tmp");
 		tempFile.deleteOnExit();
-		
-		FileWriter wrt = new FileWriter(tempFile);
+
+		OutputStreamWriter wrt = new OutputStreamWriter(
+				new FileOutputStream(tempFile), Charsets.UTF_8
+		);
 		wrt.write(content);
 		wrt.close();
 			

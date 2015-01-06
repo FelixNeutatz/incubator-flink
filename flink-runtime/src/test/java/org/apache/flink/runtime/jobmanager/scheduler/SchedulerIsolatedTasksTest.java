@@ -24,6 +24,11 @@ import static org.apache.flink.runtime.jobmanager.scheduler.SchedulerTestUtils.g
 import static org.apache.flink.runtime.jobmanager.scheduler.SchedulerTestUtils.getRandomInstance;
 import static org.junit.Assert.*;
 
+import akka.actor.ActorSystem;
+import akka.testkit.JavaTestKit;
+import org.apache.flink.runtime.testingUtils.TestingUtils;
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -33,17 +38,28 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.flink.runtime.instance.AllocatedSlot;
 import org.apache.flink.runtime.instance.Instance;
-import org.apache.flink.runtime.util.ExecutorThreadFactory;
 
 /**
  * Tests for the {@link Scheduler} when scheduling individual tasks.
  */
 public class SchedulerIsolatedTasksTest {
+	private static ActorSystem system;
+
+	@BeforeClass
+	public static void setup(){
+		system = ActorSystem.create("TestingActorSystem", TestingUtils.testConfig());
+		TestingUtils.setCallingThreadDispatcher(system);
+	}
+
+	@AfterClass
+	public static void teardown(){
+		TestingUtils.setGlobalExecutionContext();
+		JavaTestKit.shutdownActorSystem(system);
+	}
 	
 	@Test
 	public void testAddAndRemoveInstance() {
@@ -180,11 +196,13 @@ public class SchedulerIsolatedTasksTest {
 		final int NUM_INSTANCES = 50;
 		final int NUM_SLOTS_PER_INSTANCE = 3;
 		final int NUM_TASKS_TO_SCHEDULE = 2000;
+
+		TestingUtils.setGlobalExecutionContext();
 		
 		try {
 			// note: since this test asynchronously releases slots, the executor needs release workers.
 			// doing the release call synchronous can lead to a deadlock
-			Scheduler scheduler = new Scheduler(Executors.newFixedThreadPool(4, ExecutorThreadFactory.INSTANCE));
+			Scheduler scheduler = new Scheduler();
 			
 			for (int i = 0;i < NUM_INSTANCES; i++) {
 				scheduler.newInstanceAvailable(getRandomInstance((int) (Math.random() * NUM_SLOTS_PER_INSTANCE) + 1));
@@ -267,6 +285,8 @@ public class SchedulerIsolatedTasksTest {
 		catch (Exception e) {
 			e.printStackTrace();
 			fail(e.getMessage());
+		}finally{
+			TestingUtils.setCallingThreadDispatcher(system);
 		}
 	}
 	

@@ -34,7 +34,6 @@ import java.net.InetAddress;
 
 import org.apache.flink.runtime.instance.InstanceConnectionInfo;
 import org.apache.flink.runtime.profiling.ProfilingException;
-import org.apache.flink.runtime.profiling.impl.InstanceProfiler;
 import org.apache.flink.runtime.profiling.impl.types.InternalInstanceProfilingData;
 import org.junit.Before;
 import org.junit.Test;
@@ -127,7 +126,7 @@ public class InstanceProfilerTest {
 		PowerMockito.mockStatic(System.class);
 		when(System.currentTimeMillis()).thenReturn(0L);
 
-		this.out = new InstanceProfiler(this.infoMock);
+		this.out = new InstanceProfiler("InstanceProfilerTest");
 	}
 
 	@Test

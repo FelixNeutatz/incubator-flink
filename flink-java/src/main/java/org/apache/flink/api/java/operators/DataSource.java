@@ -24,6 +24,7 @@ import org.apache.flink.api.common.operators.GenericDataSourceBase;
 import org.apache.flink.api.common.operators.OperatorInformation;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.ExecutionEnvironment;
+import org.apache.flink.configuration.Configuration;
 
 /**
  * An operation that creates a new data set (data source). The operation acts as the
@@ -33,8 +34,12 @@ import org.apache.flink.api.java.ExecutionEnvironment;
  * @param <OUT> The type of the elements produced by this data source.
  */
 public class DataSource<OUT> extends Operator<OUT, DataSource<OUT>> {
-	
+
 	private final InputFormat<OUT, ?> inputFormat;
+
+	private final String dataSourceLocationName;
+
+	private Configuration parameters;
 
 	// --------------------------------------------------------------------------------------------
 	
@@ -45,8 +50,10 @@ public class DataSource<OUT> extends Operator<OUT, DataSource<OUT>> {
 	 * @param inputFormat The input format that the data source executes.
 	 * @param type The type of the elements produced by this input format.
 	 */
-	public DataSource(ExecutionEnvironment context, InputFormat<OUT, ?> inputFormat, TypeInformation<OUT> type) {
+	public DataSource(ExecutionEnvironment context, InputFormat<OUT, ?> inputFormat, TypeInformation<OUT> type, String dataSourceLocationName) {
 		super(context, type);
+		
+		this.dataSourceLocationName = dataSourceLocationName;
 		
 		if (inputFormat == null) {
 			throw new IllegalArgumentException("The input format may not be null.");
@@ -68,19 +75,37 @@ public class DataSource<OUT> extends Operator<OUT, DataSource<OUT>> {
 		return this.inputFormat;
 	}
 	
+	/**
+	 * Pass a configuration to the InputFormat
+	 * @param parameters Configuration parameters
+	 */
+	public DataSource<OUT> withParameters(Configuration parameters) {
+		this.parameters = parameters;
+		return this;
+	}
+	
+	/**
+	 * @return Configuration for the InputFormat.
+	 */
+	public Configuration getParameters() {
+		return this.parameters;
+	}
+	
 	// --------------------------------------------------------------------------------------------
 	
 	protected GenericDataSourceBase<OUT, ?> translateToDataFlow() {
-		String name = this.name != null ? this.name : this.inputFormat.toString();
-		if (name.length() > 100) {
-			name = name.substring(0, 100);
+		String name = this.name != null ? this.name : "at "+dataSourceLocationName+" ("+inputFormat.getClass().getName()+")";
+		if (name.length() > 150) {
+			name = name.substring(0, 150);
 		}
 		
 		@SuppressWarnings({ "unchecked", "rawtypes" })
 		GenericDataSourceBase<OUT, ?> source = new GenericDataSourceBase(this.inputFormat,
 				new OperatorInformation<OUT>(getType()), name);
 		source.setDegreeOfParallelism(dop);
-		
+		if(this.parameters != null) {
+			source.getParameters().addAll(this.parameters);
+		}
 		return source;
 	}
 }

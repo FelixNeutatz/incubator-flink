@@ -23,8 +23,8 @@ import java.util.Arrays;
 import java.util.List;
 
 import org.apache.flink.api.common.functions.ReduceFunction;
-import org.apache.flink.streaming.util.MockInvokable;
-import org.apache.flink.streaming.util.keys.FieldsKeySelector;
+import org.apache.flink.api.java.functions.KeySelector;
+import org.apache.flink.streaming.util.MockContext;
 import org.junit.Test;
 
 public class GroupedReduceInvokableTest {
@@ -43,13 +43,20 @@ public class GroupedReduceInvokableTest {
 	@Test
 	public void test() {
 		GroupedReduceInvokable<Integer> invokable1 = new GroupedReduceInvokable<Integer>(
-				new MyReducer(), new FieldsKeySelector<Integer>(false, false, 0));
+				new MyReducer(), new KeySelector<Integer, Integer>() {
+
+					private static final long serialVersionUID = 1L;
+
+					@Override
+					public Integer getKey(Integer value) throws Exception {
+						return value;
+					}
+				});
 
 		List<Integer> expected = Arrays.asList(1, 2, 2, 4, 3);
-		List<Integer> actual = MockInvokable.createAndExecute(invokable1,
+		List<Integer> actual = MockContext.createAndExecute(invokable1,
 				Arrays.asList(1, 1, 2, 2, 3));
 
 		assertEquals(expected, actual);
 	}
-
 }

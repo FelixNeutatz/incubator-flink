@@ -30,7 +30,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-import org.apache.avro.generic.GenericContainer;
 import org.apache.commons.lang3.Validate;
 import org.apache.flink.api.common.functions.CoGroupFunction;
 import org.apache.flink.api.common.functions.CrossFunction;
@@ -42,6 +41,7 @@ import org.apache.flink.api.common.functions.InvalidTypesException;
 import org.apache.flink.api.common.functions.JoinFunction;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.functions.MapPartitionFunction;
+import org.apache.flink.api.common.functions.Partitioner;
 import org.apache.flink.api.common.functions.util.FunctionUtils;
 import org.apache.flink.api.common.io.InputFormat;
 import org.apache.flink.api.common.typeinfo.BasicArrayTypeInfo;
@@ -113,6 +113,10 @@ public class TypeExtractor {
 	
 	public static <IN, OUT> TypeInformation<OUT> getKeySelectorTypes(KeySelector<IN, OUT> selectorInterface, TypeInformation<IN> inType) {
 		return getUnaryOperatorReturnType((Function) selectorInterface, KeySelector.class, false, false, inType);
+	}
+	
+	public static <T> TypeInformation<T> getPartitionerTypes(Partitioner<T> partitioner) {
+		return new TypeExtractor().privateCreateTypeInfo(Partitioner.class, partitioner.getClass(), 0, null, null);
 	}
 	
 	@SuppressWarnings("unchecked")
@@ -204,7 +208,7 @@ public class TypeExtractor {
 		ArrayList<Type> typeHierarchy = new ArrayList<Type>();
 		Type returnType = getParameterType(baseClass, typeHierarchy, clazz, returnParamPos);
 		
-		TypeInformation<OUT> typeInfo = null;
+		TypeInformation<OUT> typeInfo;
 		
 		// return type is a variable -> try to get the type info from the input directly
 		if (returnType instanceof TypeVariable<?>) {
@@ -227,67 +231,34 @@ public class TypeExtractor {
 		// get info from hierarchy
 		return (TypeInformation<OUT>) createTypeInfoWithTypeHierarchy(typeHierarchy, returnType, in1Type, in2Type);
 	}
-
-
-	/**
-	 * @param curT : start type
-	 * @return Type The immediate child of the top class
-	 */
-	private Type recursivelyGetTypeHierarchy(ArrayList<Type> typeHierarchy, Type curT, Class<?> stopAtClass) {
-		while (!(curT instanceof ParameterizedType && ((Class<?>) ((ParameterizedType) curT).getRawType()).equals(
-				stopAtClass))
-				&& !(curT instanceof Class<?> && ((Class<?>) curT).equals(stopAtClass))) {
-			typeHierarchy.add(curT);
-			
-			// parameterized type
-			if (curT instanceof ParameterizedType) {
-				curT = ((Class<?>) ((ParameterizedType) curT).getRawType()).getGenericSuperclass();
-			}
-			// class
-			else {
-				curT = ((Class<?>) curT).getGenericSuperclass();
-			}
-		}
-		return curT;
-	}
 	
 	@SuppressWarnings({ "unchecked", "rawtypes" })
 	private <IN1, IN2, OUT> TypeInformation<OUT> createTypeInfoWithTypeHierarchy(ArrayList<Type> typeHierarchy, Type t,
 			TypeInformation<IN1> in1Type, TypeInformation<IN2> in2Type) {
 		
 		// check if type is a subclass of tuple
-		if ((t instanceof Class<?> && Tuple.class.isAssignableFrom((Class<?>) t))
-			|| (t instanceof ParameterizedType && Tuple.class.isAssignableFrom((Class<?>) ((ParameterizedType) t).getRawType()))) {
-			
+		if (isClassType(t) && Tuple.class.isAssignableFrom(typeToClass(t))) {
 			Type curT = t;
 			
 			// do not allow usage of Tuple as type
-			if (curT instanceof Class<?> && ((Class<?>) curT).equals(Tuple.class)) {
+			if (typeToClass(t).equals(Tuple.class)) {
 				throw new InvalidTypesException(
 						"Usage of class Tuple as a type is not allowed. Use a concrete subclass (e.g. Tuple1, Tuple2, etc.) instead.");
 			}
 						
 			// go up the hierarchy until we reach immediate child of Tuple (with or without generics)
 			// collect the types while moving up for a later top-down 
-			while (!(curT instanceof ParameterizedType && ((Class<?>) ((ParameterizedType) curT).getRawType()).getSuperclass().equals(
-					Tuple.class))
-					&& !(curT instanceof Class<?> && ((Class<?>) curT).getSuperclass().equals(Tuple.class))) {
+			while (!(isClassType(curT) && typeToClass(curT).getSuperclass().equals(Tuple.class))) {
 				typeHierarchy.add(curT);
-				
-				// parameterized type
-				if (curT instanceof ParameterizedType) {
-					curT = ((Class<?>) ((ParameterizedType) curT).getRawType()).getGenericSuperclass();
-				}
-				// class
-				else {
-					curT = ((Class<?>) curT).getGenericSuperclass();
-				}
+				curT = typeToClass(curT).getGenericSuperclass();
 			}
 			
 			// check if immediate child of Tuple has generics
 			if (curT instanceof Class<?>) {
 				throw new InvalidTypesException("Tuple needs to be parameterized by using generics.");
 			}
+			
+			typeHierarchy.add(curT);
 			
 			ParameterizedType tupleChild = (ParameterizedType) curT;
 			
@@ -326,10 +297,8 @@ public class TypeExtractor {
 			}
 			
 			Class<?> tAsClass = null;
-			if (t instanceof Class<?>) {
-				tAsClass = (Class<?>) t;
-			} else if (t instanceof ParameterizedType) {
-				tAsClass = (Class<? extends Tuple>) ((ParameterizedType) t).getRawType();
+			if (isClassType(t)) {
+				tAsClass = typeToClass(t);
 			}
 			Preconditions.checkNotNull(tAsClass, "t has a unexpected type");
 			// check if the class we assumed to be a Tuple so far is actually a pojo because it contains additional fields.
@@ -337,7 +306,7 @@ public class TypeExtractor {
 			int fieldCount = countFieldsInClass(tAsClass);
 			if(fieldCount != tupleSubTypes.length) {
 				// the class is not a real tuple because it contains additional fields. treat as a pojo
-				return (TypeInformation<OUT>) analyzePojo(tAsClass, new ArrayList<Type>(), null); // the typeHierarchy here should be sufficient, even though it stops at the Tuple.class.
+				return (TypeInformation<OUT>) analyzePojo(tAsClass, new ArrayList<Type>(typeHierarchy), null); // the typeHierarchy here should be sufficient, even though it stops at the Tuple.class.
 			}
 			
 			return new TupleTypeInfo(tAsClass, tupleSubTypes);
@@ -384,7 +353,7 @@ public class TypeExtractor {
 					className = "L" + componentClass.getName() + ";";
 				}
 				
-				Class<OUT> classArray = null;
+				Class<OUT> classArray;
 				try {
 					classArray = (Class<OUT>) Class.forName("[" + className);
 				} catch (ClassNotFoundException e) {
@@ -403,22 +372,10 @@ public class TypeExtractor {
 		}
 		// no tuple, no TypeVariable, no generic type
 		else if (t instanceof Class) {
-			return privateGetForClass((Class<OUT>) t, new ArrayList<Type>());
+			return privateGetForClass((Class<OUT>) t, typeHierarchy);
 		}
 		
 		throw new InvalidTypesException("Type Information could not be created.");
-	}
-	
-	private int countFieldsInClass(Class<?> clazz) {
-		int fieldCount = 0;
-		for(Field field : clazz.getFields()) { // get all fields
-			if(	!Modifier.isStatic(field.getModifiers()) &&
-				!Modifier.isTransient(field.getModifiers())
-				) {
-				fieldCount++;
-			}
-		}
-		return fieldCount;
 	}
 
 	private <IN1, IN2> TypeInformation<?> createTypeInfoFromInputs(TypeVariable<?> returnTypeVar, ArrayList<Type> returnTypeHierarchy, 
@@ -434,21 +391,37 @@ public class TypeExtractor {
 			returnTypeVar = (TypeVariable<?>) matReturnTypeVar;
 		}
 		
+		// no input information exists
+		if (in1TypeInfo == null && in2TypeInfo == null) {
+			return null;
+		}
+		
+		// create a new type hierarchy for the input
+		ArrayList<Type> inputTypeHierarchy = new ArrayList<Type>();
+		// copy the function part of the type hierarchy
+		for (Type t : returnTypeHierarchy) {
+			if (isClassType(t) && Function.class.isAssignableFrom(typeToClass(t)) && typeToClass(t) != Function.class) {
+				inputTypeHierarchy.add(t);
+			}
+			else {
+				break;
+			}
+		}
+		ParameterizedType baseClass = (ParameterizedType) inputTypeHierarchy.get(inputTypeHierarchy.size() - 1);
+		
 		TypeInformation<?> info = null;
 		if (in1TypeInfo != null) {
 			// find the deepest type variable that describes the type of input 1
-			ParameterizedType baseClass = (ParameterizedType) returnTypeHierarchy.get(returnTypeHierarchy.size() - 1);
 			Type in1Type = baseClass.getActualTypeArguments()[0];
 
-			info = createTypeInfoFromInput(returnTypeVar, returnTypeHierarchy, in1Type, in1TypeInfo);
+			info = createTypeInfoFromInput(returnTypeVar, new ArrayList<Type>(inputTypeHierarchy), in1Type, in1TypeInfo);
 		}
 
 		if (info == null && in2TypeInfo != null) {
 			// find the deepest type variable that describes the type of input 2
-			ParameterizedType baseClass = (ParameterizedType) returnTypeHierarchy.get(returnTypeHierarchy.size() - 1);
 			Type in2Type = baseClass.getActualTypeArguments()[1];
 
-			info = createTypeInfoFromInput(returnTypeVar, returnTypeHierarchy, in2Type, in2TypeInfo);
+			info = createTypeInfoFromInput(returnTypeVar, new ArrayList<Type>(inputTypeHierarchy), in2Type, in2TypeInfo);
 		}
 
 		if (info != null) {
@@ -458,20 +431,33 @@ public class TypeExtractor {
 		return null;
 	}
 	
-	private <IN1> TypeInformation<?> createTypeInfoFromInput(TypeVariable<?> returnTypeVar, ArrayList<Type> returnTypeHierarchy, 
-			Type inType, TypeInformation<IN1> inTypeInfo) {
+	private <IN1> TypeInformation<?> createTypeInfoFromInput(TypeVariable<?> returnTypeVar, ArrayList<Type> inputTypeHierarchy, Type inType, TypeInformation<IN1> inTypeInfo) {
 		TypeInformation<?> info = null;
+		
 		// the input is a type variable
 		if (inType instanceof TypeVariable) {
-			inType = materializeTypeVariable(returnTypeHierarchy, (TypeVariable<?>) inType);
+			inType = materializeTypeVariable(inputTypeHierarchy, (TypeVariable<?>) inType);
 			info = findCorrespondingInfo(returnTypeVar, inType, inTypeInfo);
 		}
 		// the input is a tuple that may contains type variables
-		else if (inType instanceof ParameterizedType && Tuple.class.isAssignableFrom(((Class<?>)((ParameterizedType) inType).getRawType()))) {
-			Type[] tupleElements = ((ParameterizedType) inType).getActualTypeArguments();
+		else if (isClassType(inType) && Tuple.class.isAssignableFrom(typeToClass(inType))) {
+			ParameterizedType tupleBaseClass = null;
+			
+			// get tuple from possible tuple subclass
+			while (!(isClassType(inType) && typeToClass(inType).getSuperclass().equals(Tuple.class))) {
+				inputTypeHierarchy.add(inType);
+				inType = typeToClass(inType).getGenericSuperclass();
+			}
+			inputTypeHierarchy.add(inType);
+			
+			// we can assume to be parameterized since we
+			// already did input validation
+			tupleBaseClass = (ParameterizedType) inType;
+			
+			Type[] tupleElements = tupleBaseClass.getActualTypeArguments();
 			// go thru all tuple elements and search for type variables
-			for(int i = 0; i < tupleElements.length; i++) {
-				info = createTypeInfoFromInput(returnTypeVar, returnTypeHierarchy, tupleElements[i], ((TupleTypeInfo<?>) inTypeInfo).getTypeAt(i));
+			for (int i = 0; i < tupleElements.length; i++) {
+				info = createTypeInfoFromInput(returnTypeVar, inputTypeHierarchy, tupleElements[i], ((TupleTypeInfo<?>) inTypeInfo).getTypeAt(i));
 				if(info != null) {
 					break;
 				}
@@ -489,6 +475,9 @@ public class TypeExtractor {
 	}
 	
 	private static Type getParameterType(Class<?> baseClass, ArrayList<Type> typeHierarchy, Class<?> clazz, int pos) {
+		if (typeHierarchy != null) {
+			typeHierarchy.add(clazz);
+		}
 		Type[] interfaceTypes = clazz.getGenericInterfaces();
 		
 		// search in interfaces for base class
@@ -516,7 +505,7 @@ public class TypeExtractor {
 			if (typeHierarchy != null) {
 				typeHierarchy.add(t);
 			}
-			ParameterizedType baseClassChild = (ParameterizedType) t;				
+			ParameterizedType baseClassChild = (ParameterizedType) t;
 			return baseClassChild.getActualTypeArguments()[pos];
 		}
 		// interface that extended base class as class or parameterized type
@@ -588,30 +577,19 @@ public class TypeExtractor {
 			// check for tuple
 			else if (typeInfo.isTupleType()) {
 				// check if tuple at all
-				if (!(type instanceof Class<?> && Tuple.class.isAssignableFrom((Class<?>) type))
-						&& !(type instanceof ParameterizedType && Tuple.class.isAssignableFrom((Class<?>) ((ParameterizedType) type)
-								.getRawType()))) {
+				if (!(isClassType(type) && Tuple.class.isAssignableFrom(typeToClass(type)))) {
 					throw new InvalidTypesException("Tuple type expected.");
 				}
 				
 				// do not allow usage of Tuple as type
-				if (type instanceof Class<?> && ((Class<?>) type).equals(Tuple.class)) {
+				if (isClassType(type) && typeToClass(type).equals(Tuple.class)) {
 					throw new InvalidTypesException("Concrete subclass of Tuple expected.");
 				}
 				
 				// go up the hierarchy until we reach immediate child of Tuple (with or without generics)
-				while (!(type instanceof ParameterizedType && ((Class<?>) ((ParameterizedType) type).getRawType()).getSuperclass().equals(
-						Tuple.class))
-						&& !(type instanceof Class<?> && ((Class<?>) type).getSuperclass().equals(Tuple.class))) {
+				while (!(isClassType(type) && typeToClass(type).getSuperclass().equals(Tuple.class))) {
 					typeHierarchy.add(type);
-					// parameterized type
-					if (type instanceof ParameterizedType) {
-						type = ((Class<?>) ((ParameterizedType) type).getRawType()).getGenericSuperclass();
-					}
-					// class
-					else {
-						type = ((Class<?>) type).getGenericSuperclass();
-					}
+					type = typeToClass(type).getGenericSuperclass();
 				}
 				
 				// check if immediate child of Tuple has generics
@@ -697,7 +675,7 @@ public class TypeExtractor {
 					throw new InvalidTypesException("Value type expected.");
 				}
 				
-				TypeInformation<?> actual = null;
+				TypeInformation<?> actual;
 				// check value type contents
 				if (!((ValueTypeInfo<?>) typeInfo).equals(actual = ValueTypeInfo.getValueTypeInfo((Class<? extends Value>) type))) {
 					throw new InvalidTypesException("Value type '" + typeInfo + "' expected but was '" + actual + "'.");
@@ -706,20 +684,27 @@ public class TypeExtractor {
 			// check for POJO
 			else if (typeInfo instanceof PojoTypeInfo) {
 				Class<?> clazz = null;
-				if (!(type instanceof Class<?> && ((PojoTypeInfo<?>) typeInfo).getTypeClass() == (clazz = (Class<?>) type))
-						&& !(type instanceof ParameterizedType && (clazz = (Class<?>) ((ParameterizedType) type).getRawType()) == ((PojoTypeInfo<?>) typeInfo)
-								.getTypeClass())) {
+				if (!(isClassType(type) && ((PojoTypeInfo<?>) typeInfo).getTypeClass() == (clazz = typeToClass(type)))) {
 					throw new InvalidTypesException("POJO type '"
 							+ ((PojoTypeInfo<?>) typeInfo).getTypeClass().getCanonicalName() + "' expected but was '"
 							+ clazz.getCanonicalName() + "'.");
 				}
 			}
+			// check for Enum
+			else if (typeInfo instanceof EnumTypeInfo) {
+				if (!(type instanceof Class<?> && Enum.class.isAssignableFrom((Class<?>) type))) {
+					throw new InvalidTypesException("Enum type expected.");
+				}
+				// check enum type contents
+				if (!(typeInfo.getTypeClass() == type)) {
+					throw new InvalidTypesException("Enum type '" + typeInfo.getTypeClass().getCanonicalName() + "' expected but was '"
+							+ typeToClass(type).getCanonicalName() + "'.");
+				}
+			}
 			// check for generic object
 			else if (typeInfo instanceof GenericTypeInfo<?>) {
 				Class<?> clazz = null;
-				if (!(type instanceof Class<?> && ((GenericTypeInfo<?>) typeInfo).getTypeClass() == (clazz = (Class<?>) type))
-						&& !(type instanceof ParameterizedType && (clazz = (Class<?>) ((ParameterizedType) type).getRawType()) == ((GenericTypeInfo<?>) typeInfo)
-								.getTypeClass())) {
+				if (!(isClassType(type) && ((GenericTypeInfo<?>) typeInfo).getTypeClass() == (clazz = typeToClass(type)))) {
 					throw new InvalidTypesException("Generic object type '"
 							+ ((GenericTypeInfo<?>) typeInfo).getTypeClass().getCanonicalName() + "' expected but was '"
 							+ clazz.getCanonicalName() + "'.");
@@ -737,10 +722,38 @@ public class TypeExtractor {
 	//  Utility methods
 	// --------------------------------------------------------------------------------------------
 	
+	/**
+	 * @param curT : start type
+	 * @return Type The immediate child of the top class
+	 */
+	private Type getTypeHierarchy(ArrayList<Type> typeHierarchy, Type curT, Class<?> stopAtClass) {
+		// skip first one
+		if (typeHierarchy.size() > 0 && typeHierarchy.get(0) == curT && isClassType(curT)) {
+			curT = typeToClass(curT).getGenericSuperclass();
+		}
+		while (!(isClassType(curT) && typeToClass(curT).equals(stopAtClass))) {
+			typeHierarchy.add(curT);
+			curT = typeToClass(curT).getGenericSuperclass();
+		}
+		return curT;
+	}
+	
+	private int countFieldsInClass(Class<?> clazz) {
+		int fieldCount = 0;
+		for(Field field : clazz.getFields()) { // get all fields
+			if(	!Modifier.isStatic(field.getModifiers()) &&
+				!Modifier.isTransient(field.getModifiers())
+				) {
+				fieldCount++;
+			}
+		}
+		return fieldCount;
+	}
+	
 	private static Type removeGenericWrapper(Type t) {
 		if(t instanceof ParameterizedType 	&& 
-				(Collector.class.isAssignableFrom((Class<?>) ((ParameterizedType) t).getRawType())
-						|| Iterable.class.isAssignableFrom((Class<?>) ((ParameterizedType) t).getRawType()))) {
+				(Collector.class.isAssignableFrom(typeToClass(t))
+						|| Iterable.class.isAssignableFrom(typeToClass(t)))) {
 			return ((ParameterizedType) t).getActualTypeArguments()[0];
 		}
 		return t;
@@ -862,7 +875,7 @@ public class TypeExtractor {
 	private <X> TypeInformation<X> privateGetForClass(Class<X> clazz, ArrayList<Type> typeHierarchy) {
 		return privateGetForClass(clazz, typeHierarchy, null);
 	}
-	@SuppressWarnings("unchecked")
+	@SuppressWarnings({ "unchecked", "rawtypes" })
 	private <X> TypeInformation<X> privateGetForClass(Class<X> clazz, ArrayList<Type> typeHierarchy, ParameterizedType clazzTypeHint) {
 		Validate.notNull(clazz);
 		
@@ -872,7 +885,6 @@ public class TypeExtractor {
 		}
 
 		if (clazz.equals(Object.class)) {
-			// TODO (merging): better throw an exception here. the runtime does not support it yet
 			return new GenericTypeInfo<X>(clazz);
 		}
 		
@@ -919,6 +931,10 @@ public class TypeExtractor {
 			throw new InvalidTypesException("Type information extraction for tuples cannot be done based on the class.");
 		}
 
+		// check for Enums
+		if(Enum.class.isAssignableFrom(clazz)) {
+			return (TypeInformation<X>) new EnumTypeInfo(clazz);
+		}
 
 		if (alreadySeen.contains(clazz)) {
 			return new GenericTypeInfo<X>(clazz);
@@ -930,16 +946,16 @@ public class TypeExtractor {
 			// special case handling for Class, this should not be handled by the POJO logic
 			return new GenericTypeInfo<X>(clazz);
 		}
-		if(GenericContainer.class.isAssignableFrom(clazz)) {
-			// this is a type generated by Avro. GenericTypeInfo is able to handle this case because its using Avro.
-			return new GenericTypeInfo<X>(clazz);
-		}
+
 		try {
-			TypeInformation<X> pojoType = analyzePojo(clazz, typeHierarchy, clazzTypeHint);
+			TypeInformation<X> pojoType = analyzePojo(clazz, new ArrayList<Type>(typeHierarchy), clazzTypeHint);
 			if (pojoType != null) {
 				return pojoType;
 			}
 		} catch (InvalidTypesException e) {
+			if(LOG.isDebugEnabled()) {
+				LOG.debug("Unable to handle type "+clazz+" as POJO. Message: "+e.getMessage(), e);
+			}
 			// ignore and create generic type info
 		}
 
@@ -973,12 +989,12 @@ public class TypeExtractor {
 			}
 			for(Method m : clazz.getMethods()) {
 				// check for getter
-				if(	// The name should be "get<FieldName>" or "<fieldName>" (for scala).
-					(m.getName().toLowerCase().equals("get"+fieldNameLow) || m.getName().toLowerCase().equals(fieldNameLow)) &&
+				if(	// The name should be "get<FieldName>" or "<fieldName>" (for scala) or "is<fieldName>" for boolean fields.
+					(m.getName().toLowerCase().equals("get"+fieldNameLow) || m.getName().toLowerCase().equals("is"+fieldNameLow) || m.getName().toLowerCase().equals(fieldNameLow)) &&
 					// no arguments for the getter
 					m.getParameterTypes().length == 0 &&
 					// return type is same as field type (or the generic variant of it)
-					(m.getReturnType().equals( fieldType ) || (fieldTypeGeneric != null && m.getGenericReturnType().equals(fieldTypeGeneric)) )
+					(m.getGenericReturnType().equals( fieldType ) || (fieldTypeGeneric != null && m.getGenericReturnType().equals(fieldTypeGeneric)) )
 				) {
 					if(hasGetter) {
 						throw new IllegalStateException("Detected more than one getter");
@@ -988,7 +1004,7 @@ public class TypeExtractor {
 				// check for setters (<FieldName>_$eq for scala)
 				if((m.getName().toLowerCase().equals("set"+fieldNameLow) || m.getName().toLowerCase().equals(fieldNameLow+"_$eq")) &&
 					m.getParameterTypes().length == 1 && // one parameter of the field's type
-					( m.getParameterTypes()[0].equals( fieldType ) || (fieldTypeGeneric != null && m.getGenericParameterTypes()[0].equals(fieldTypeGeneric) ) )&&
+					( m.getGenericParameterTypes()[0].equals( fieldType ) || (fieldTypeGeneric != null && m.getGenericParameterTypes()[0].equals(fieldTypeGeneric) ) )&&
 					// return type is void.
 					m.getReturnType().equals(Void.TYPE)
 				) {
@@ -1013,12 +1029,12 @@ public class TypeExtractor {
 	}
 
 	private <X> TypeInformation<X> analyzePojo(Class<X> clazz, ArrayList<Type> typeHierarchy, ParameterizedType clazzTypeHint) {
-		// try to create Type hierarchy, if the incoming one is empty.
-		if(typeHierarchy.size() == 0) {
-			recursivelyGetTypeHierarchy(typeHierarchy, clazz, Object.class);
+		// try to create Type hierarchy, if the incoming only contains the most bottom one or none.
+		if(typeHierarchy.size() <= 1) {
+			getTypeHierarchy(typeHierarchy, clazz, Object.class);
 		}
 		if(clazzTypeHint != null) {
-			recursivelyGetTypeHierarchy(typeHierarchy, clazzTypeHint, Object.class);
+			getTypeHierarchy(typeHierarchy, clazzTypeHint, Object.class);
 		}
 		
 		List<Field> fields = getAllDeclaredFields(clazz);
@@ -1030,12 +1046,15 @@ public class TypeExtractor {
 				return null;
 			}
 			try {
-				typeHierarchy.add(fieldType);
-				pojoFields.add(new PojoField(field, createTypeInfoWithTypeHierarchy(typeHierarchy, fieldType, null, null) ));
+				ArrayList<Type> fieldTypeHierarchy = new ArrayList<Type>(typeHierarchy);
+				fieldTypeHierarchy.add(fieldType);
+				pojoFields.add(new PojoField(field, createTypeInfoWithTypeHierarchy(fieldTypeHierarchy, fieldType, null, null) ));
 			} catch (InvalidTypesException e) {
-				//pojoFields.add(new PojoField(field, new GenericTypeInfo( Object.class ))); // we need kryo to properly serialize this
-				throw new InvalidTypesException("Flink is currently unable to serialize this type: "+fieldType+""
-						+ "\nThe system is internally using the Avro serializer which is not able to handle that type.", e);
+				Class<?> genericClass = Object.class;
+				if(isClassType(fieldType)) {
+					genericClass = typeToClass(fieldType);
+				}
+				pojoFields.add(new PojoField(field, new GenericTypeInfo( genericClass )));
 			}
 		}
 
@@ -1112,6 +1131,20 @@ public class TypeExtractor {
 			clazz = clazz.getSuperclass();
 		}
 		return result;
+	}
+	
+	private static Class<?> typeToClass(Type t) {
+		if (t instanceof Class) {
+			return (Class<?>)t;
+		}
+		else if (t instanceof ParameterizedType) {
+			return ((Class<?>)((ParameterizedType) t).getRawType());
+		}
+		throw new IllegalArgumentException("Cannot convert type to class");
+	}
+	
+	private static boolean isClassType(Type t) {
+		return t instanceof Class<?> || t instanceof ParameterizedType;
 	}
 
 

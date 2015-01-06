@@ -32,17 +32,21 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import akka.actor.ActorRef;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.GlobalConfiguration;
+import org.apache.flink.runtime.akka.AkkaUtils;
 import org.apache.flink.runtime.instance.Instance;
-import org.apache.flink.runtime.jobmanager.JobManager;
 
+import org.apache.flink.runtime.messages.JobManagerMessages.RequestRegisteredTaskManagers$;
+import org.apache.flink.runtime.messages.JobManagerMessages.RegisteredTaskManagers;
 import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import scala.concurrent.duration.FiniteDuration;
 
 /**
  * A Servlet that displays the Configuration in the web interface.
@@ -56,13 +60,15 @@ public class SetupInfoServlet extends HttpServlet {
 	private static final Logger LOG = LoggerFactory.getLogger(SetupInfoServlet.class);
 	
 	
-	private Configuration globalC;
-	private JobManager jobmanager;
+	final private Configuration globalC;
+	final private ActorRef jobmanager;
+	final private FiniteDuration timeout;
 	
 	
-	public SetupInfoServlet(JobManager jm) {
+	public SetupInfoServlet(ActorRef jm, FiniteDuration timeout) {
 		globalC = GlobalConfiguration.getConfiguration();
 		this.jobmanager = jm;
+		this.timeout = timeout;
 	}
 	
 	@Override
@@ -99,9 +105,10 @@ public class SetupInfoServlet extends HttpServlet {
 	}
 	
 	private void writeTaskmanagers(HttpServletResponse resp) throws IOException {
-		
-		List<Instance> instances = new ArrayList<Instance>(jobmanager.getInstanceManager().getAllRegisteredInstances().values());
-		
+
+		List<Instance> instances = new ArrayList<Instance>(AkkaUtils.<RegisteredTaskManagers>ask
+				(jobmanager, RequestRegisteredTaskManagers$.MODULE$, timeout).asJavaCollection());
+
 		Collections.sort(instances, INSTANCE_SORTER);
 				
 		JSONObject obj = new JSONObject();
@@ -113,7 +120,7 @@ public class SetupInfoServlet extends HttpServlet {
 	
 			try {
 				objInner.put("inetAdress", instance.getInstanceConnectionInfo().getInetAdress());
-				objInner.put("ipcPort", instance.getInstanceConnectionInfo().ipcPort());
+				objInner.put("ipcPort", instance.getTaskManager().path().address().hostPort());
 				objInner.put("dataPort", instance.getInstanceConnectionInfo().dataPort());
 				objInner.put("timeSinceLastHeartbeat", time / 1000);
 				objInner.put("slotsNumber", instance.getTotalNumberOfSlots());

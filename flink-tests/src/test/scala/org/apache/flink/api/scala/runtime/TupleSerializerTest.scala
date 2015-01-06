@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,6 +16,8 @@
  * limitations under the License.
  */
 package org.apache.flink.api.scala.runtime
+
+import java.util
 
 import org.apache.flink.api.java.typeutils.TupleTypeInfoBase
 import org.apache.flink.api.java.typeutils.runtime.AbstractGenericTypeSerializerTest._
@@ -154,11 +156,13 @@ class TupleSerializerTest {
     val b5 = new Book(Long.MaxValue, "Winnign a prize for creative test strings", 0xBADF00)
     val b6 = new Book(-2L, "Distributed Systems", 0xABCDEF0123456789L)
 
-    val list = List("A", "B", "C", "D", "E")
-    val ba1 = new BookAuthor(976243875L, list.asJava, "Arno Nym")
+    // We need to use actual java Lists here, to make them serializable by the GenericSerializer
+    val list = new util.LinkedList[String]()
+    list.addAll(List("A", "B", "C", "D", "E").asJava)
+    val ba1 = new BookAuthor(976243875L, list, "Arno Nym")
 
-    val list2 = List[String]()
-    val ba2 = new BookAuthor(987654321L, list2.asJava, "The Saurus")
+    val list2 = new util.LinkedList[String]()
+    val ba2 = new BookAuthor(987654321L, list2, "The Saurus")
 
     val testTuples = Array(
       (a, b1, o1, ba1, co1),

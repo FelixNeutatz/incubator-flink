@@ -16,7 +16,6 @@
  * limitations under the License.
  */
 
-
 package org.apache.flink.client.program;
 
 import java.io.ByteArrayOutputStream;
@@ -25,8 +24,12 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.net.InetSocketAddress;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
-import org.apache.commons.lang3.StringEscapeUtils;
+import akka.actor.ActorRef;
+import akka.actor.ActorSystem;
+import org.apache.flink.runtime.messages.JobManagerMessages.SubmissionFailure;
+import org.apache.flink.runtime.messages.JobManagerMessages.SubmissionResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.flink.api.common.JobExecutionResult;
@@ -45,13 +48,14 @@ import org.apache.flink.configuration.GlobalConfiguration;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.runtime.client.JobClient;
 import org.apache.flink.runtime.client.JobExecutionException;
-import org.apache.flink.runtime.client.JobSubmissionResult;
-import org.apache.flink.runtime.client.AbstractJobResult.ReturnCode;
 import org.apache.flink.runtime.jobgraph.JobGraph;
 
 import com.google.common.base.Preconditions;
 
 import org.apache.flink.api.java.ExecutionEnvironment;
+import org.apache.flink.api.java.ExecutionEnvironmentFactory;
+import scala.Tuple2;
+import scala.concurrent.duration.FiniteDuration;
 
 /**
  * Encapsulates the functionality necessary to submit a program to a remote cluster.
@@ -65,9 +69,7 @@ public class Client {
 	
 	private final PactCompiler compiler;		// the compiler to compile the jobs
 	
-	private final ClassLoader userCodeClassLoader;
-
-	private boolean printStatusDuringExecution;
+	private boolean printStatusDuringExecution = false;
 	
 	// ------------------------------------------------------------------------
 	//                            Construction
@@ -82,10 +84,10 @@ public class Client {
 	public Client(InetSocketAddress jobManagerAddress, Configuration config, ClassLoader userCodeClassLoader) {
 		Preconditions.checkNotNull(config, "Configuration is null");
 		this.configuration = config;
-		configuration.setString(ConfigConstants.JOB_MANAGER_IPC_ADDRESS_KEY, jobManagerAddress.getAddress().getHostAddress());
+		configuration.setString(ConfigConstants.JOB_MANAGER_IPC_ADDRESS_KEY,
+				jobManagerAddress.getHostName());
 		configuration.setInteger(ConfigConstants.JOB_MANAGER_IPC_PORT_KEY, jobManagerAddress.getPort());
 		
-		this.userCodeClassLoader = userCodeClassLoader;
 		this.compiler = new PactCompiler(new DataStatistics(), new DefaultCostEstimator());
 	}
 
@@ -110,7 +112,6 @@ public class Client {
 			throw new CompilerException("Cannot find port to job manager's RPC service in the global configuration.");
 		}
 
-		this.userCodeClassLoader = userCodeClassLoader;
 		this.compiler = new PactCompiler(new DataStatistics(), new DefaultCostEstimator());
 	}
 	
@@ -156,7 +157,7 @@ public class Client {
 			ByteArrayOutputStream baes = new ByteArrayOutputStream();
 			System.setErr(new PrintStream(baes));
 			try {
-				ContextEnvironment.disableLocalExecution();
+				ContextEnvironment.enableLocalExecution(false);
 				prog.invokeInteractiveModeForExecution();
 			}
 			catch (ProgramInvocationException e) {
@@ -169,7 +170,9 @@ public class Client {
 				} else {
 					throw new ProgramInvocationException("The program caused an error: ", t);
 				}
-			} finally {
+			}
+			finally {
+				ContextEnvironment.enableLocalExecution(true);
 				System.setOut(originalOut);
 				System.setErr(originalErr);
 				System.err.println(baes);
@@ -177,9 +180,9 @@ public class Client {
 			}
 			
 			throw new ProgramInvocationException(
-					"The program plan could not be fetched - the program aborted pre-maturely. <br/><br/>"
-					+ "System.err: "+StringEscapeUtils.escapeHtml4(baes.toString())+" <br/>"
-					+ "System.out: "+StringEscapeUtils.escapeHtml4(baos.toString())+" <br/>" );
+					"The program plan could not be fetched - the program aborted pre-maturely.\n"
+					+ "System.err: " + baes.toString() + '\n'
+					+ "System.out: " + baos.toString() + '\n');
 		}
 		else {
 			throw new RuntimeException();
@@ -230,18 +233,17 @@ public class Client {
 			return run(prog.getPlanWithJars(), parallelism, wait);
 		}
 		else if (prog.isUsingInteractiveMode()) {
-			ContextEnvironment env = new ContextEnvironment(this, prog.getAllLibraries(), prog.getUserCodeClassLoader());
 			
-			if (parallelism > 0) {
-				env.setDegreeOfParallelism(parallelism);
-			}
-			env.setAsContext();
-			
-			ContextEnvironment.disableLocalExecution();
-			
+			ContextEnvironment.setAsContext(this, prog.getAllLibraries(), prog.getUserCodeClassLoader(), parallelism);
+			ContextEnvironment.enableLocalExecution(false);
 			if (wait) {
 				// invoke here
-				prog.invokeInteractiveModeForExecution();
+				try {
+					prog.invokeInteractiveModeForExecution();
+				}
+				finally {
+					ContextEnvironment.enableLocalExecution(true);
+				}
 			}
 			else {
 				// invoke in the background
@@ -252,6 +254,9 @@ public class Client {
 						}
 						catch (Throwable t) {
 							LOG.error("The program execution failed.", t);
+						}
+						finally {
+							ContextEnvironment.enableLocalExecution(true);
 						}
 					}
 				};
@@ -292,31 +297,41 @@ public class Client {
 	}
 
 	public JobExecutionResult run(JobGraph jobGraph, boolean wait) throws ProgramInvocationException {
-		JobClient client;
-		try {
-			client = new JobClient(jobGraph, configuration, this.userCodeClassLoader);
+		Tuple2<ActorSystem, ActorRef> pair = JobClient.startActorSystemAndActor(configuration);
+
+		ActorRef client = pair._2();
+
+		String hostname = configuration.getString(ConfigConstants
+				.JOB_MANAGER_IPC_ADDRESS_KEY, null);
+
+		FiniteDuration timeout = new FiniteDuration(configuration.getInteger(ConfigConstants
+				.AKKA_ASK_TIMEOUT, ConfigConstants.DEFAULT_AKKA_ASK_TIMEOUT), TimeUnit.SECONDS);
+
+		if(hostname == null){
+			throw new ProgramInvocationException("Could not find hostname of job manager.");
 		}
-		catch (IOException e) {
-			throw new ProgramInvocationException("Could not open job manager: " + e.getMessage());
-		}
-		
-		client.setConsoleStreamForReporting(this.printStatusDuringExecution ? System.out : null);
 
 		try {
+			JobClient.uploadJarFiles(jobGraph, hostname, client, timeout);
+		}catch(IOException e){
+			throw new ProgramInvocationException("Could not upload blobs.", e);
+		}
+
+		try {
+
 			if (wait) {
-				return client.submitJobAndWait();
+				return JobClient.submitJobAndWait(jobGraph, printStatusDuringExecution, client,
+						timeout);
 			}
 			else {
-				JobSubmissionResult result = client.submitJob();
-				
-				if (result.getReturnCode() != ReturnCode.SUCCESS) {
-					throw new ProgramInvocationException("The job was not successfully submitted to the nephele job manager"
-						+ (result.getDescription() == null ? "." : ": " + result.getDescription()));
+				SubmissionResponse response =JobClient.submitJobDetached(jobGraph, client, timeout);
+
+				if(response instanceof SubmissionFailure){
+					SubmissionFailure failure = (SubmissionFailure) response;
+					throw new ProgramInvocationException("The job was not successfully submitted " +
+							"to the flink job manager", failure.cause());
 				}
 			}
-		}
-		catch (IOException e) {
-			throw new ProgramInvocationException("Could not submit job to job manager: " + e.getMessage());
 		}
 		catch (JobExecutionException jex) {
 			if(jex.isJobCanceledByUser()) {
@@ -324,7 +339,11 @@ public class Client {
 			} else {
 				throw new ProgramInvocationException("The program execution failed: " + jex.getMessage());
 			}
+		}finally{
+			pair._1().shutdown();
+			pair._1().awaitTermination();
 		}
+
 		return new JobExecutionResult(-1, null);
 	}
 	
@@ -352,7 +371,7 @@ public class Client {
 
 		@Override
 		public String getExecutionPlan() throws Exception {
-			Plan plan = createProgramPlan();
+			Plan plan = createProgramPlan(null, false);
 			this.optimizerPlan = compiler.compile(plan);
 			
 			// do not go on with anything now!
@@ -360,7 +379,14 @@ public class Client {
 		}
 		
 		private void setAsContext() {
-			initializeContextEnvironment(this);
+			ExecutionEnvironmentFactory factory = new ExecutionEnvironmentFactory() {
+				
+				@Override
+				public ExecutionEnvironment createExecutionEnvironment() {
+					return OptimizerPlanEnvironment.this;
+				}
+			};
+			initializeContextEnvironment(factory);
 		}
 	}
 	

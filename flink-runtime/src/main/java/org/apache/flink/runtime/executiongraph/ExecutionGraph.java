@@ -18,6 +18,7 @@
 
 package org.apache.flink.runtime.executiongraph;
 
+import java.io.Serializable;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -26,17 +27,18 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
+import akka.actor.ActorRef;
+import org.apache.flink.runtime.akka.AkkaUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.JobException;
 import org.apache.flink.runtime.blob.BlobKey;
-import org.apache.flink.runtime.execution.ExecutionListener;
 import org.apache.flink.runtime.execution.ExecutionState;
 import org.apache.flink.runtime.instance.Instance;
 import org.apache.flink.runtime.instance.InstanceConnectionInfo;
@@ -49,11 +51,16 @@ import org.apache.flink.runtime.jobgraph.JobID;
 import org.apache.flink.runtime.jobgraph.JobStatus;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.jobmanager.scheduler.Scheduler;
+import org.apache.flink.runtime.messages.ExecutionGraphMessages;
 import org.apache.flink.runtime.taskmanager.TaskExecutionState;
+import org.apache.flink.runtime.messages.ExecutionGraphMessages.JobStatusChanged;
 import org.apache.flink.util.ExceptionUtils;
 
+import static akka.dispatch.Futures.future;
 
-public class ExecutionGraph {
+
+public class ExecutionGraph implements Serializable {
+	static final long serialVersionUID = 42L;
 
 	private static final AtomicReferenceFieldUpdater<ExecutionGraph, JobStatus> STATE_UPDATER =
 			AtomicReferenceFieldUpdater.newUpdater(ExecutionGraph.class, JobStatus.class, "state");
@@ -70,7 +77,10 @@ public class ExecutionGraph {
 	private final String jobName;
 
 	/** The job configuration that was originally attached to the JobGraph. */
-	private final Configuration jobConfiguration;
+	private transient final Configuration jobConfiguration;
+	
+	/** The classloader of the user code. */
+	private final ClassLoader userClassLoader;
 	
 	/** All job vertices that are part of this graph */
 	private final ConcurrentHashMap<JobVertexID, ExecutionJobVertex> tasks;
@@ -79,29 +89,24 @@ public class ExecutionGraph {
 	private final List<ExecutionJobVertex> verticesInCreationOrder;
 
 	/** All intermediate results that are part of this graph */
-	private final ConcurrentHashMap<IntermediateDataSetID, IntermediateResult> intermediateResults;
+	private transient final ConcurrentHashMap<IntermediateDataSetID, IntermediateResult>
+	intermediateResults;
 	
 	/** The currently executed tasks, for callbacks */
-	private final ConcurrentHashMap<ExecutionAttemptID, Execution> currentExecutions;
+	private transient final ConcurrentHashMap<ExecutionAttemptID, Execution> currentExecutions;
 
+	private transient final Map<ChannelID, ExecutionEdge> edges = new HashMap<ChannelID,
+			ExecutionEdge>();
 	
+	private transient final List<BlobKey> requiredJarFiles;
 	
-	private final Map<ChannelID, ExecutionEdge> edges = new HashMap<ChannelID, ExecutionEdge>();
-	
-	
-	/** An executor that can run long actions (involving remote calls) */
-	private final ExecutorService executor;
+	private transient final List<ActorRef> jobStatusListenerActors;
 
-	private final List<BlobKey> requiredJarFiles;
-	
-	private final List<JobStatusListener> jobStatusListeners;
-	
-	private final List<ExecutionListener> executionListeners;
+	private transient final List<ActorRef> executionListenerActors;
 	
 	private final long[] stateTimestamps;
 	
-	
-	private final Object progressLock = new Object();
+	private transient final Object progressLock = new Object();
 	
 	private int nextVertexToFinish;
 	
@@ -114,33 +119,38 @@ public class ExecutionGraph {
 	private volatile Throwable failureCause;
 	
 	
-	private Scheduler scheduler;
+	private transient Scheduler scheduler;
 	
 	private boolean allowQueuedScheduling = true;
 	
 	
 	public ExecutionGraph(JobID jobId, String jobName, Configuration jobConfig) {
-		this(jobId, jobName, jobConfig, new ArrayList<BlobKey>(), null);
+		this(jobId, jobName, jobConfig, new ArrayList<BlobKey>());
 	}
 	
 	public ExecutionGraph(JobID jobId, String jobName, Configuration jobConfig,
-						List<BlobKey> requiredJarFiles,ExecutorService executor) {
-		if (jobId == null || jobName == null || jobConfig == null) {
+						List<BlobKey> requiredJarFiles) {
+		this(jobId, jobName, jobConfig, requiredJarFiles, Thread.currentThread().getContextClassLoader());
+	}
+	
+	public ExecutionGraph(JobID jobId, String jobName, Configuration jobConfig, 
+			List<BlobKey> requiredJarFiles, ClassLoader userClassLoader) {
+		if (jobId == null || jobName == null || jobConfig == null || userClassLoader == null) {
 			throw new NullPointerException();
 		}
 		
 		this.jobID = jobId;
 		this.jobName = jobName;
 		this.jobConfiguration = jobConfig;
-		this.executor = executor;
-		
+		this.userClassLoader = userClassLoader;
+
 		this.tasks = new ConcurrentHashMap<JobVertexID, ExecutionJobVertex>();
 		this.intermediateResults = new ConcurrentHashMap<IntermediateDataSetID, IntermediateResult>();
 		this.verticesInCreationOrder = new ArrayList<ExecutionJobVertex>();
 		this.currentExecutions = new ConcurrentHashMap<ExecutionAttemptID, Execution>();
 		
-		this.jobStatusListeners = new CopyOnWriteArrayList<JobStatusListener>();
-		this.executionListeners = new CopyOnWriteArrayList<ExecutionListener>();
+		this.jobStatusListenerActors  = new CopyOnWriteArrayList<ActorRef>();
+		this.executionListenerActors = new CopyOnWriteArrayList<ActorRef>();
 		
 		this.stateTimestamps = new long[JobStatus.values().length];
 		this.stateTimestamps[JobStatus.CREATED.ordinal()] = System.currentTimeMillis();
@@ -226,8 +236,16 @@ public class ExecutionGraph {
 		return jobConfiguration;
 	}
 	
+	public ClassLoader getUserClassLoader() {
+		return this.userClassLoader;
+	}
+	
 	public JobStatus getState() {
 		return state;
+	}
+	
+	public Throwable getFailureCause() {
+		return failureCause;
 	}
 	
 	public ExecutionJobVertex getJobVertex(JobVertexID id) {
@@ -298,8 +316,6 @@ public class ExecutionGraph {
 	}
 	
 	// --------------------------------------------------------------------------------------------
-	//  Actions
-	// --------------------------------------------------------------------------------------------
 	
 	public void scheduleForExecution(Scheduler scheduler) throws JobException {
 		if (scheduler == null) {
@@ -366,26 +382,8 @@ public class ExecutionGraph {
 			// no need to treat other states
 		}
 	}
-	
-	public void waitForJobEnd(long timeout) throws InterruptedException {
-		synchronized (progressLock) {
-			
-			long now = System.currentTimeMillis();
-			long deadline = timeout == 0 ? Long.MAX_VALUE : now + timeout;
-			
-			
-			while (now < deadline && !state.isTerminalState()) {
-				progressLock.wait(deadline - now);
-				now = System.currentTimeMillis();
-			}
-		}
-	}
-	
-	public void waitForJobEnd() throws InterruptedException {
-		waitForJobEnd(0);
-	}
-	
-	
+
+
 	private boolean transitionState(JobStatus current, JobStatus newState) {
 		return transitionState(current, newState, null);
 	}
@@ -437,18 +435,18 @@ public class ExecutionGraph {
 						if (current == JobStatus.FAILING) {
 							if (numberOfRetriesLeft > 0 && transitionState(current, JobStatus.RESTARTING)) {
 								numberOfRetriesLeft--;
-								
-								execute(new Runnable() {
+								future(new Callable<Object>() {
 									@Override
-									public void run() {
-										try {
+									public Object call() throws Exception {
+										try{
 											Thread.sleep(delayBeforeRetrying);
-										} catch (InterruptedException e) {
+										}catch(InterruptedException e){
 											// should only happen on shutdown
 										}
 										restart();
+										return null;
 									}
-								});
+								}, AkkaUtils.globalExecutionContext());
 								break;
 							}
 							else if (numberOfRetriesLeft <= 0 && transitionState(current, JobStatus.FAILED, failureCause)) {
@@ -517,7 +515,7 @@ public class ExecutionGraph {
 			// common case - found task running
 			if (executionState == ExecutionState.RUNNING) {
 				Instance location = targetVertex.getCurrentAssignedResource().getInstance();
-				
+
 				if (location.getInstanceConnectionInfo().equals(caller)) {
 					// Receiver runs on the same task manager
 					return ConnectionInfoLookupResponse.createReceiverFoundAndReady(edge.getOutputChannelId());
@@ -637,12 +635,13 @@ public class ExecutionGraph {
 	//  Listeners & Observers
 	// --------------------------------------------------------------------------------------------
 	
-	public void registerJobStatusListener(JobStatusListener jobStatusListener) {
-		this.jobStatusListeners.add(jobStatusListener);
+	public void registerJobStatusListener(ActorRef listener){
+		this.jobStatusListenerActors.add(listener);
+
 	}
-	
-	public void registerExecutionListener(ExecutionListener executionListener) {
-		this.executionListeners.add(executionListener);
+
+	public void registerExecutionListener(ActorRef listener){
+		this.executionListenerActors.add(listener);
 	}
 	
 	/**
@@ -652,19 +651,14 @@ public class ExecutionGraph {
 	 * @param error
 	 */
 	private void notifyJobStatusChange(JobStatus newState, Throwable error) {
-		if (jobStatusListeners.size() > 0) {
-			
+		if(jobStatusListenerActors.size() > 0){
 			String message = error == null ? null : ExceptionUtils.stringifyException(error);
-		
-			for (JobStatusListener listener : this.jobStatusListeners) {
-				try {
-					listener.jobStatusHasChanged(this, newState, message);
-				}
-				catch (Throwable t) {
-					LOG.error("Notification of job status change caused an error.", t);
-				}
+			for(ActorRef listener: jobStatusListenerActors){
+				listener.tell(new JobStatusChanged(jobID, newState, System.currentTimeMillis(),
+								message), ActorRef.noSender());
 			}
 		}
+
 	}
 	
 	/**
@@ -675,40 +669,26 @@ public class ExecutionGraph {
 	 * @param newExecutionState
 	 * @param error
 	 */
-	void notifyExecutionChange(JobVertexID vertexId, int subtask, ExecutionAttemptID executionId, ExecutionState newExecutionState, Throwable error) {
+	void notifyExecutionChange(JobVertexID vertexId, int subtask, ExecutionAttemptID executionID, ExecutionState
+							newExecutionState, Throwable error) {
+		ExecutionJobVertex vertex = getJobVertex(vertexId);
 
-		// we must be very careful here with exceptions 
-		if (this.executionListeners.size() > 0) {
-			
+		if(executionListenerActors.size() >0){
 			String message = error == null ? null : ExceptionUtils.stringifyException(error);
-			for (ExecutionListener listener : this.executionListeners) {
-				try {
-					listener.executionStateChanged(jobID, vertexId, subtask, executionId, newExecutionState, message);
-				}
-				catch (Throwable t) {
-					LOG.error("Notification of execution state change caused an error.", t);
-				}
+			for(ActorRef listener : executionListenerActors){
+				listener.tell(new ExecutionGraphMessages.ExecutionStateChanged(jobID, vertexId,
+								vertex.getJobVertex().getName(), vertex.getParallelism(), subtask,
+								executionID, newExecutionState, System.currentTimeMillis(),
+								message), ActorRef.noSender());
 			}
 		}
-		
+
 		// see what this means for us. currently, the first FAILED state means -> FAILED
 		if (newExecutionState == ExecutionState.FAILED) {
 			fail(error);
 		}
 	}
 
-	// --------------------------------------------------------------------------------------------
-	//  Miscellaneous
-	// --------------------------------------------------------------------------------------------
-	
-	public void execute(Runnable action) {
-		if (this.executor != null) {
-			this.executor.submit(action);
-		} else {
-			action.run();
-		}
-	}
-	
 	public void restart() {
 		try {
 			if (state == JobStatus.FAILED) {
@@ -721,24 +701,23 @@ public class ExecutionGraph {
 				if (scheduler == null) {
 					throw new IllegalStateException("The execution graph has not been schedudled before - scheduler is null.");
 				}
-				
+
 				this.currentExecutions.clear();
 				this.edges.clear();
-				
+
 				for (ExecutionJobVertex jv : this.verticesInCreationOrder) {
 					jv.resetForNewExecution();
 				}
-				
+
 				for (int i = 0; i < stateTimestamps.length; i++) {
 					stateTimestamps[i] = 0;
 				}
 				nextVertexToFinish = 0;
 				transitionState(JobStatus.RESTARTING, JobStatus.CREATED);
 			}
-			
+
 			scheduleForExecution(scheduler);
-		}
-		catch (Throwable t) {
+		} catch (Throwable t) {
 			fail(t);
 		}
 	}

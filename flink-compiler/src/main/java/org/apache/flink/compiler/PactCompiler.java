@@ -67,7 +67,7 @@ import org.apache.flink.compiler.dag.GroupReduceNode;
 import org.apache.flink.compiler.dag.IterationNode;
 import org.apache.flink.compiler.dag.MapNode;
 import org.apache.flink.compiler.dag.MapPartitionNode;
-import org.apache.flink.compiler.dag.MatchNode;
+import org.apache.flink.compiler.dag.JoinNode;
 import org.apache.flink.compiler.dag.OptimizerNode;
 import org.apache.flink.compiler.dag.PactConnection;
 import org.apache.flink.compiler.dag.PartitionNode;
@@ -95,6 +95,7 @@ import org.apache.flink.compiler.plan.WorksetPlanNode;
 import org.apache.flink.compiler.postpass.OptimizerPostPass;
 import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.GlobalConfiguration;
+import org.apache.flink.runtime.operators.DriverStrategy;
 import org.apache.flink.runtime.operators.shipping.ShipStrategyType;
 import org.apache.flink.runtime.operators.util.LocalStrategy;
 import org.apache.flink.util.InstantiationUtil;
@@ -580,9 +581,7 @@ public class PactCompiler {
 
 		// finalize the plan
 		OptimizedPlan plan = new PlanFinalizer().createFinalPlan(bestPlanSinks, program.getJobName(), program);
-
-		// swap the binary unions for n-ary unions. this changes no strategies or memory consumers whatsoever, so
-		// we can do this after the plan finalization
+		
 		plan.accept(new BinaryUnionReplacer());
 		
 		// post pass the plan. this is the phase where the serialization and comparator code is set
@@ -696,7 +695,7 @@ public class PactCompiler {
 				n = new GroupReduceNode((GroupReduceOperatorBase<?, ?, ?>) c);
 			}
 			else if (c instanceof JoinOperatorBase) {
-				n = new MatchNode((JoinOperatorBase<?, ?, ?, ?>) c);
+				n = new JoinNode((JoinOperatorBase<?, ?, ?, ?>) c);
 			}
 			else if (c instanceof CoGroupOperatorBase) {
 				n = new CoGroupNode((CoGroupOperatorBase<?, ?, ?, ?>) c);
@@ -837,10 +836,7 @@ public class PactCompiler {
 				
 				// go over the contained data flow and mark the dynamic path nodes
 				StaticDynamicPathIdentifier identifier = new StaticDynamicPathIdentifier(iterNode.getCostWeight());
-				rootOfStepFunction.accept(identifier);
-				if(terminationCriterion != null){
-					terminationCriterion.accept(identifier);
-				}
+				iterNode.acceptForStepFunction(identifier);
 			}
 			else if (n instanceof WorksetIterationNode) {
 				final WorksetIterationNode iterNode = (WorksetIterationNode) n;
@@ -849,7 +845,7 @@ public class PactCompiler {
 				// we need to ensure that both the next-workset and the solution-set-delta depend on the workset. One check is for free
 				// during the translation, we do the other check here as a pre-condition
 				{
-					WorksetFinder wsf = new WorksetFinder();
+					StepFunctionValidator wsf = new StepFunctionValidator();
 					iter.getNextWorkset().accept(wsf);
 					if (!wsf.foundWorkset) {
 						throw new CompilerException("In the given program, the next workset does not depend on the workset. This is a prerequisite in delta iterations.");
@@ -883,9 +879,9 @@ public class PactCompiler {
 					for (PactConnection conn : solutionSetNode.getOutgoingConnections()) {
 						OptimizerNode successor = conn.getTarget();
 					
-						if (successor.getClass() == MatchNode.class) {
+						if (successor.getClass() == JoinNode.class) {
 							// find out which input to the match the solution set is
-							MatchNode mn = (MatchNode) successor;
+							JoinNode mn = (JoinNode) successor;
 							if (mn.getFirstPredecessorNode() == solutionSetNode) {
 								mn.makeJoinWithSolutionSet(0);
 							} else if (mn.getSecondPredecessorNode() == solutionSetNode) {
@@ -905,7 +901,7 @@ public class PactCompiler {
 							}
 						}
 						else {
-							throw new CompilerException("Error: The only operations allowed on the solution set are Join and CoGroup.");
+							throw new InvalidProgramException("Error: The only operations allowed on the solution set are Join and CoGroup.");
 						}
 					}
 				}
@@ -919,8 +915,7 @@ public class PactCompiler {
 				
 				// go over the contained data flow and mark the dynamic path nodes
 				StaticDynamicPathIdentifier pathIdentifier = new StaticDynamicPathIdentifier(iterNode.getCostWeight());
-				nextWorksetNode.accept(pathIdentifier);
-				iterNode.getSolutionSetDelta().accept(pathIdentifier);
+				iterNode.acceptForStepFunction(pathIdentifier);
 			}
 		}
 	};
@@ -943,6 +938,11 @@ public class PactCompiler {
 		@Override
 		public void postVisit(OptimizerNode visitable) {
 			visitable.identifyDynamicPath(this.costWeight);
+			
+			// check that there is no nested iteration on the dynamic path
+			if (visitable.isOnDynamicPath() && visitable instanceof IterationNode) {
+				throw new CompilerException("Nested iterations are currently not supported.");
+			}
 		}
 	}
 	
@@ -1028,7 +1028,6 @@ public class PactCompiler {
 			}
 		}
 
-
 		@Override
 		public void postVisit(OptimizerNode visitable) {}
 	}
@@ -1056,8 +1055,11 @@ public class PactCompiler {
 	}
 	
 	/**
-	 * Utility class that traverses a plan to collect all nodes and add them to the OptimizedPlan.
-	 * Besides collecting all nodes, this traversal assigns the memory to the nodes.
+	 * Finalization of the plan:
+	 *  - The graph of nodes is double-linked (links from child to parent are inserted)
+	 *  - If unions join static and dynamic paths, the cache is marked as a memory consumer
+	 *  - Relative memory fractions are assigned to all nodes.
+	 *  - All nodes are collected into a set.
 	 */
 	private static final class PlanFinalizer implements Visitor<PlanNode> {
 		
@@ -1118,9 +1120,7 @@ public class PactCompiler {
 							c.setRelativeTempMemory(relativeMem);
 							if (LOG.isDebugEnabled()) {
 								LOG.debug("Assigned " + relativeMem + " of total memory to each instance of the temp " +
-										"table" +
-										" " +
-										"for " + c + ".");
+										"table for " + c + ".");
 							}
 						}
 					}
@@ -1141,6 +1141,12 @@ public class PactCompiler {
 			}
 			else if (visitable instanceof SourcePlanNode) {
 				this.sources.add((SourcePlanNode) visitable);
+			}
+			else if (visitable instanceof BinaryUnionPlanNode) {
+				BinaryUnionPlanNode unionNode = (BinaryUnionPlanNode) visitable;
+				if (unionNode.unionsStaticAndDynamicPath()) {
+					unionNode.setDriverStrategy(DriverStrategy.UNION_WITH_CACHED);
+				}
 			}
 			else if (visitable instanceof BulkPartialSolutionPlanNode) {
 				// tell the partial solution about the iteration node that contains it
@@ -1228,7 +1234,6 @@ public class PactCompiler {
 		@Override
 		public void postVisit(PlanNode visitable) {}
 	}
-
 	
 	/**
 	 * A visitor that traverses the graph and collects cascading binary unions into a single n-ary
@@ -1255,24 +1260,50 @@ public class PactCompiler {
 		public void postVisit(PlanNode visitable) {
 			
 			if (visitable instanceof BinaryUnionPlanNode) {
+				
 				final BinaryUnionPlanNode unionNode = (BinaryUnionPlanNode) visitable;
 				final Channel in1 = unionNode.getInput1();
 				final Channel in2 = unionNode.getInput2();
 			
-				PlanNode newUnionNode;
+				if (!unionNode.unionsStaticAndDynamicPath()) {
+					
+					// both on static path, or both on dynamic path. we can collapse them
+					NAryUnionPlanNode newUnionNode;
 
-				List<Channel> inputs = new ArrayList<Channel>();
-				collect(in1, inputs);
-				collect(in2, inputs);
+					List<Channel> inputs = new ArrayList<Channel>();
+					collect(in1, inputs);
+					collect(in2, inputs);
 
-				newUnionNode = new NAryUnionPlanNode(unionNode.getOptimizerNode(), inputs, unionNode.getGlobalProperties());
+					newUnionNode = new NAryUnionPlanNode(unionNode.getOptimizerNode(), inputs, 
+							unionNode.getGlobalProperties(), unionNode.getCumulativeCosts());
+					
+					newUnionNode.setDegreeOfParallelism(unionNode.getDegreeOfParallelism());
 
-				for (Channel c : inputs) {
-					c.setTarget(newUnionNode);
+					for (Channel c : inputs) {
+						c.setTarget(newUnionNode);
+					}
+
+					for (Channel channel : unionNode.getOutgoingChannels()) {
+						channel.swapUnionNodes(newUnionNode);
+						newUnionNode.addOutgoingChannel(channel);
+					}
 				}
-
-				for(Channel channel : unionNode.getOutgoingChannels()){
-					channel.swapUnionNodes(newUnionNode);
+				else {
+					// union between the static and the dynamic path. we need to handle this for now
+					// through a special union operator
+					
+					// make sure that the first input is the cached (static) and the second input is the dynamic
+					if (in1.isOnDynamicPath()) {
+						BinaryUnionPlanNode newUnionNode = new BinaryUnionPlanNode(unionNode);
+						
+						in1.setTarget(newUnionNode);
+						in2.setTarget(newUnionNode);
+						
+						for (Channel channel : unionNode.getOutgoingChannels()) {
+							channel.swapUnionNodes(newUnionNode);
+							newUnionNode.addOutgoingChannel(channel);
+						}
+					}
 				}
 			}
 		}
@@ -1289,13 +1320,13 @@ public class PactCompiler {
 				
 				inputs.addAll(((NAryUnionPlanNode) in.getSource()).getListOfInputs());
 			} else {
-				// is not a union node, so we take the channel directly
+				// is not a collapsed union node, so we take the channel directly
 				inputs.add(in);
 			}
 		}
 	}
 	
-	private static final class WorksetFinder implements Visitor<Operator<?>> {
+	private static final class StepFunctionValidator implements Visitor<Operator<?>> {
 
 		private final Set<Operator<?>> seenBefore = new HashSet<Operator<?>>();
 		

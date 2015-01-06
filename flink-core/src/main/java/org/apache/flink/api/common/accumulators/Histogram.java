@@ -20,11 +20,10 @@
 package org.apache.flink.api.common.accumulators;
 
 import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.util.Map;
 import java.util.TreeMap;
-
-import org.apache.flink.core.memory.DataInputView;
-import org.apache.flink.core.memory.DataOutputView;
 
 /**
  * Histogram for discrete-data. Let's you populate a histogram distributedly.
@@ -34,11 +33,11 @@ import org.apache.flink.core.memory.DataOutputView;
  * Could be extended to continuous values later, but then we need to dynamically
  * decide about the bin size in an online algorithm (or ask the user)
  */
-public class Histogram implements Accumulator<Integer, Map<Integer, Integer>> {
+public class Histogram implements Accumulator<Integer, TreeMap<Integer, Integer>> {
 
 	private static final long serialVersionUID = 1L;
 
-	private Map<Integer, Integer> treeMap = new TreeMap<Integer, Integer>();
+	private TreeMap<Integer, Integer> treeMap = new TreeMap<Integer, Integer>();
 
 	@Override
 	public void add(Integer value) {
@@ -48,12 +47,12 @@ public class Histogram implements Accumulator<Integer, Map<Integer, Integer>> {
 	}
 
 	@Override
-	public Map<Integer, Integer> getLocalValue() {
+	public TreeMap<Integer, Integer> getLocalValue() {
 		return this.treeMap;
 	}
 
 	@Override
-	public void merge(Accumulator<Integer, Map<Integer, Integer>> other) {
+	public void merge(Accumulator<Integer, TreeMap<Integer, Integer>> other) {
 		// Merge the values into this map
 		for (Map.Entry<Integer, Integer> entryFromOther : ((Histogram) other).getLocalValue()
 				.entrySet()) {
@@ -77,7 +76,7 @@ public class Histogram implements Accumulator<Integer, Map<Integer, Integer>> {
 	}
 
 	@Override
-	public void write(DataOutputView out) throws IOException {
+	public void write(ObjectOutputStream out) throws IOException {
 		out.writeInt(treeMap.size());
 		for (Map.Entry<Integer, Integer> entry : treeMap.entrySet()) {
 			out.writeInt(entry.getKey());
@@ -86,11 +85,20 @@ public class Histogram implements Accumulator<Integer, Map<Integer, Integer>> {
 	}
 
 	@Override
-	public void read(DataInputView in) throws IOException {
+	public void read(ObjectInputStream in) throws IOException {
 		int size = in.readInt();
 		for (int i = 0; i < size; ++i) {
 			treeMap.put(in.readInt(), in.readInt());
 		}
+	}
+
+	@Override
+	public Accumulator<Integer, TreeMap<Integer, Integer>> clone() {
+		Histogram result = new Histogram();
+
+		result.treeMap = new TreeMap<Integer, Integer>(treeMap);
+
+		return result;
 	}
 
 }

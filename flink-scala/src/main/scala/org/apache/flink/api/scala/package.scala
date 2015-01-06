@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -62,5 +62,12 @@ package object scala {
         throw new UnsupportedOperationException("Specifying fields by name is only" +
           "supported on Case Classes (for now).")
     }
+  }
+  def getCallLocationName(depth: Int = 3) : String = {
+    val st = Thread.currentThread().getStackTrace();
+    if(st.length < depth) {
+      return "<unknown>"
+    }
+    st(depth).toString
   }
 }

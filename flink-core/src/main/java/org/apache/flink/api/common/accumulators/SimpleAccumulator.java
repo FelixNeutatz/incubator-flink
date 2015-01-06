@@ -19,9 +19,10 @@
 
 package org.apache.flink.api.common.accumulators;
 
+import java.io.Serializable;
+
 /**
  * Similar to Accumulator, but the type of items to add and the result value
  * must be the same.
  */
-public interface SimpleAccumulator<T> extends Accumulator<T,T> {
-}
+public interface SimpleAccumulator<T extends Serializable> extends Accumulator<T,T> {}

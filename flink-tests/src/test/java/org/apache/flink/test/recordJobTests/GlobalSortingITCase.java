@@ -16,7 +16,6 @@
  * limitations under the License.
  */
 
-
 package org.apache.flink.test.recordJobTests;
 
 import java.util.ArrayList;
@@ -35,6 +34,7 @@ import org.apache.flink.api.java.record.operators.FileDataSource;
 import org.apache.flink.test.util.RecordAPITestBase;
 import org.apache.flink.types.IntValue;
 
+@SuppressWarnings("deprecation")
 public class GlobalSortingITCase extends RecordAPITestBase {
 	
 	private static final int NUM_RECORDS = 100000;
@@ -86,7 +86,7 @@ public class GlobalSortingITCase extends RecordAPITestBase {
 	@Override
 	protected Plan getTestJob() {
 		GlobalSort globalSort = new GlobalSort();
-		return globalSort.getPlan(new Integer(DOP).toString(), recordsPath, resultPath);
+		return globalSort.getPlan(Integer.valueOf(DOP).toString(), recordsPath, resultPath);
 	}
 
 	@Override

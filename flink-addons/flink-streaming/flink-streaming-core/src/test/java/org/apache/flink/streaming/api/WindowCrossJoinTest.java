@@ -19,17 +19,23 @@ package org.apache.flink.streaming.api;
 
 import static org.junit.Assert.assertEquals;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 
+import org.apache.flink.api.common.functions.CrossFunction;
+import org.apache.flink.api.java.tuple.Tuple1;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.environment.LocalStreamEnvironment;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.function.sink.SinkFunction;
-import org.apache.flink.streaming.api.invokable.util.TimeStamp;
+import org.apache.flink.streaming.api.windowing.helper.TimestampWrapper;
+import org.apache.flink.streaming.util.TestStreamEnvironment;
 import org.junit.Test;
 
-public class WindowCrossJoinTest {
+public class WindowCrossJoinTest implements Serializable {
+
+	private static final long serialVersionUID = 1L;
+
 	private static final long MEMORYSIZE = 32;
 
 	private static ArrayList<Tuple2<Tuple2<Integer, String>, Integer>> joinResults = new ArrayList<Tuple2<Tuple2<Integer, String>, Integer>>();
@@ -40,20 +46,20 @@ public class WindowCrossJoinTest {
 
 	@Test
 	public void test() throws Exception {
-		LocalStreamEnvironment env = StreamExecutionEnvironment.createLocalEnvironment(1);
+		StreamExecutionEnvironment env = new TestStreamEnvironment(1, MEMORYSIZE);
 		env.setBufferTimeout(1);
 
 		ArrayList<Tuple2<Integer, String>> in1 = new ArrayList<Tuple2<Integer, String>>();
-		ArrayList<Integer> in2 = new ArrayList<Integer>();
+		ArrayList<Tuple1<Integer>> in2 = new ArrayList<Tuple1<Integer>>();
 
 		in1.add(new Tuple2<Integer, String>(10, "a"));
 		in1.add(new Tuple2<Integer, String>(20, "b"));
 		in1.add(new Tuple2<Integer, String>(20, "x"));
 		in1.add(new Tuple2<Integer, String>(0, "y"));
 
-		in2.add(0);
-		in2.add(5);
-		in2.add(20);
+		in2.add(new Tuple1<Integer>(0));
+		in2.add(new Tuple1<Integer>(5));
+		in2.add(new Tuple1<Integer>(20));
 
 		joinExpectedResults.add(new Tuple2<Tuple2<Integer, String>, Integer>(
 				new Tuple2<Integer, String>(20, "b"), 20));
@@ -88,39 +94,44 @@ public class WindowCrossJoinTest {
 				new Tuple2<Integer, String>(0, "y"), 20));
 
 		DataStream<Tuple2<Integer, String>> inStream1 = env.fromCollection(in1);
-		DataStream<Integer> inStream2 = env.fromCollection(in2);
+		DataStream<Tuple1<Integer>> inStream2 = env.fromCollection(in2);
 
-		inStream1.windowJoin(inStream2, 1000, 1000, new MyTimestamp1(), new MyTimestamp2(), 0, 0)
+		inStream1
+				.join(inStream2)
+				.onWindow(1000, 1000, new MyTimestamp<Tuple2<Integer, String>>(),
+						new MyTimestamp<Tuple1<Integer>>()).where(0).equalTo(0)
 				.addSink(new JoinResultSink());
 
-		inStream1.windowCross(inStream2, 1000, 1000, new MyTimestamp1(), new MyTimestamp2())
-			.addSink(new CrossResultSink());
+		inStream1
+				.cross(inStream2)
+				.onWindow(1000, 1000, new MyTimestamp<Tuple2<Integer, String>>(),
+						new MyTimestamp<Tuple1<Integer>>())
+				.with(new CrossFunction<Tuple2<Integer, String>, Tuple1<Integer>, Tuple2<Tuple2<Integer, String>, Tuple1<Integer>>>() {
 
-		env.executeTest(MEMORYSIZE);
-		
+					private static final long serialVersionUID = 1L;
+
+					@Override
+					public Tuple2<Tuple2<Integer, String>, Tuple1<Integer>> cross(
+							Tuple2<Integer, String> val1, Tuple1<Integer> val2) throws Exception {
+						return new Tuple2<Tuple2<Integer, String>, Tuple1<Integer>>(val1, val2);
+					}
+				}).addSink(new CrossResultSink());
+
+		env.execute();
+
 		assertEquals(joinExpectedResults, joinResults);
 		assertEquals(crossExpectedResults, crossResults);
 	}
 
-	private static class MyTimestamp1 implements TimeStamp<Tuple2<Integer, String>> {
+	private static class MyTimestamp<T> extends TimestampWrapper<T> {
+		public MyTimestamp() {
+			super(null, 0);
+		}
+
 		private static final long serialVersionUID = 1L;
 
 		@Override
-		public long getTimestamp(Tuple2<Integer, String> value) {
-			return 101L;
-		}
-
-		@Override
-		public long getStartTime() {
-			return 100L;
-		}
-	}
-
-	private static class MyTimestamp2 implements TimeStamp<Integer> {
-		private static final long serialVersionUID = 1L;
-
-		@Override
-		public long getTimestamp(Integer value) {
+		public long getTimestamp(T value) {
 			return 101L;
 		}
 
@@ -131,22 +142,22 @@ public class WindowCrossJoinTest {
 	}
 
 	private static class JoinResultSink implements
-			SinkFunction<Tuple2<Tuple2<Integer, String>, Integer>> {
+			SinkFunction<Tuple2<Tuple2<Integer, String>, Tuple1<Integer>>> {
 		private static final long serialVersionUID = 1L;
 
 		@Override
-		public void invoke(Tuple2<Tuple2<Integer, String>, Integer> value) {
-			joinResults.add(value);
+		public void invoke(Tuple2<Tuple2<Integer, String>, Tuple1<Integer>> value) {
+			joinResults.add(new Tuple2<Tuple2<Integer, String>, Integer>(value.f0, value.f1.f0));
 		}
 	}
 
 	private static class CrossResultSink implements
-			SinkFunction<Tuple2<Tuple2<Integer, String>, Integer>> {
+			SinkFunction<Tuple2<Tuple2<Integer, String>, Tuple1<Integer>>> {
 		private static final long serialVersionUID = 1L;
 
 		@Override
-		public void invoke(Tuple2<Tuple2<Integer, String>, Integer> value) {
-			crossResults.add(value);
+		public void invoke(Tuple2<Tuple2<Integer, String>, Tuple1<Integer>> value) {
+			crossResults.add(new Tuple2<Tuple2<Integer, String>, Integer>(value.f0, value.f1.f0));
 		}
 	}
 }

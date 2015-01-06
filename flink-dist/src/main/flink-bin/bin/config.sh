@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 ################################################################################
 #  Licensed to the Apache Software Foundation (ASF) under one
 #  or more contributor license agreements.  See the NOTICE file
@@ -75,7 +75,7 @@ DEFAULT_ENV_SSH_OPTS=""                             # Optional SSH parameters ru
 # CONFIG KEYS: The default values can be overwritten by the following keys in conf/flink-conf.yaml
 ########################################################################################################################
 
-KEY_JOBM_HEAP_MB="jobmanager.heap.mb"
+KEY_JOBM_HEAP_MB="jobManager.heap.mb"
 KEY_TASKM_HEAP_MB="taskmanager.heap.mb"
 KEY_ENV_PID_DIR="env.pid.dir"
 KEY_ENV_LOG_MAX="env.log.max"
@@ -191,7 +191,7 @@ JVM_ARGS=""
 CLASSPATH=`manglePathList $( echo $FLINK_LIB_DIR/*.jar . | sed 's/ /:/g' )`
 
 # Auxilliary function which extracts the name of host from a line which
-# also potentialy includes topology information and the instance type
+# also potentialy includes topology information and the taskManager type
 extractHostName() {
     # extract first part of string (before any whitespace characters)
     SLAVE=$1

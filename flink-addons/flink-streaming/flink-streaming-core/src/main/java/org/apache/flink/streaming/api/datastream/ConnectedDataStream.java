@@ -17,23 +17,17 @@
 
 package org.apache.flink.streaming.api.datastream;
 
-import java.io.Serializable;
-
-import org.apache.commons.lang3.SerializationException;
-import org.apache.commons.lang3.SerializationUtils;
-import org.apache.flink.api.common.functions.Function;
 import org.apache.flink.api.common.functions.RichFlatMapFunction;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.java.ClosureCleaner;
 import org.apache.flink.api.java.functions.KeySelector;
-import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.api.java.typeutils.TypeExtractor;
 import org.apache.flink.streaming.api.JobGraphBuilder;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.function.co.CoFlatMapFunction;
 import org.apache.flink.streaming.api.function.co.CoMapFunction;
 import org.apache.flink.streaming.api.function.co.CoReduceFunction;
 import org.apache.flink.streaming.api.function.co.CoWindowFunction;
-import org.apache.flink.streaming.api.function.co.CrossWindowFunction;
-import org.apache.flink.streaming.api.function.co.JoinWindowFunction;
 import org.apache.flink.streaming.api.function.co.RichCoMapFunction;
 import org.apache.flink.streaming.api.function.co.RichCoReduceFunction;
 import org.apache.flink.streaming.api.invokable.operator.co.CoFlatMapInvokable;
@@ -42,18 +36,14 @@ import org.apache.flink.streaming.api.invokable.operator.co.CoInvokable;
 import org.apache.flink.streaming.api.invokable.operator.co.CoMapInvokable;
 import org.apache.flink.streaming.api.invokable.operator.co.CoReduceInvokable;
 import org.apache.flink.streaming.api.invokable.operator.co.CoWindowInvokable;
-import org.apache.flink.streaming.api.invokable.util.DefaultTimeStamp;
-import org.apache.flink.streaming.api.invokable.util.TimeStamp;
-import org.apache.flink.streaming.util.serialization.CombineTypeWrapper;
-import org.apache.flink.streaming.util.serialization.FunctionTypeWrapper;
-import org.apache.flink.streaming.util.serialization.ObjectTypeWrapper;
-import org.apache.flink.streaming.util.serialization.TypeWrapper;
+import org.apache.flink.streaming.api.windowing.helper.SystemTimestamp;
+import org.apache.flink.streaming.api.windowing.helper.TimestampWrapper;
 
 /**
  * The ConnectedDataStream represents a stream for two different data types. It
  * can be used to apply transformations like {@link CoMapFunction} on two
  * {@link DataStream}s
- *
+ * 
  * @param <IN1>
  *            Type of the first input data steam.
  * @param <IN2>
@@ -97,6 +87,18 @@ public class ConnectedDataStream<IN1, IN2> {
 		this.keySelector2 = coDataStream.keySelector2;
 	}
 
+	public <F> F clean(F f) {
+		if (getExecutionEnvironment().getConfig().isClosureCleanerEnabled()) {
+			ClosureCleaner.clean(f, true);
+		}
+		ClosureCleaner.ensureSerializable(f);
+		return f;
+	}
+
+	public StreamExecutionEnvironment getExecutionEnvironment() {
+		return environment;
+	}
+
 	/**
 	 * Returns the first {@link DataStream}.
 	 * 
@@ -121,7 +123,7 @@ public class ConnectedDataStream<IN1, IN2> {
 	 * @return The type of the first input
 	 */
 	public TypeInformation<IN1> getInputType1() {
-		return dataStream1.getOutputType();
+		return dataStream1.getType();
 	}
 
 	/**
@@ -130,7 +132,7 @@ public class ConnectedDataStream<IN1, IN2> {
 	 * @return The type of the second input
 	 */
 	public TypeInformation<IN2> getInputType2() {
-		return dataStream2.getOutputType();
+		return dataStream2.getType();
 	}
 
 	/**
@@ -150,6 +152,60 @@ public class ConnectedDataStream<IN1, IN2> {
 	public ConnectedDataStream<IN1, IN2> groupBy(int keyPosition1, int keyPosition2) {
 		return new ConnectedDataStream<IN1, IN2>(dataStream1.groupBy(keyPosition1),
 				dataStream2.groupBy(keyPosition2));
+	}
+
+	/**
+	 * GroupBy operation for connected data stream. Groups the elements of
+	 * input1 and input2 according to keyPositions1 and keyPositions2. Used for
+	 * applying function on grouped data streams for example
+	 * {@link ConnectedDataStream#reduce}
+	 * 
+	 * @param keyPositions1
+	 *            The fields used to group the first input stream.
+	 * @param keyPositions2
+	 *            The fields used to group the second input stream.
+	 * @return @return The transformed {@link ConnectedDataStream}
+	 */
+	public ConnectedDataStream<IN1, IN2> groupBy(int[] keyPositions1, int[] keyPositions2) {
+		return new ConnectedDataStream<IN1, IN2>(dataStream1.groupBy(keyPositions1),
+				dataStream2.groupBy(keyPositions2));
+	}
+
+	/**
+	 * GroupBy operation for connected data stream using key expressions. Groups
+	 * the elements of input1 and input2 according to field1 and field2. A field
+	 * expression is either the name of a public field or a getter method with
+	 * parentheses of the {@link DataStream}S underlying type. A dot can be used
+	 * to drill down into objects, as in {@code "field1.getInnerField2()" }.
+	 * 
+	 * @param field1
+	 *            The grouping expression for the first input
+	 * @param field2
+	 *            The grouping expression for the second input
+	 * @return The grouped {@link ConnectedDataStream}
+	 */
+	public ConnectedDataStream<IN1, IN2> groupBy(String field1, String field2) {
+		return new ConnectedDataStream<IN1, IN2>(dataStream1.groupBy(field1),
+				dataStream2.groupBy(field2));
+	}
+
+	/**
+	 * GroupBy operation for connected data stream using key expressions. Groups
+	 * the elements of input1 and input2 according to fields1 and fields2. A
+	 * field expression is either the name of a public field or a getter method
+	 * with parentheses of the {@link DataStream}S underlying type. A dot can be
+	 * used to drill down into objects, as in {@code "field1.getInnerField2()" }
+	 * .
+	 * 
+	 * @param fields1
+	 *            The grouping expressions for the first input
+	 * @param fields2
+	 *            The grouping expressions for the second input
+	 * @return The grouped {@link ConnectedDataStream}
+	 */
+	public ConnectedDataStream<IN1, IN2> groupBy(String[] fields1, String[] fields2) {
+		return new ConnectedDataStream<IN1, IN2>(dataStream1.groupBy(fields1),
+				dataStream2.groupBy(fields2));
 	}
 
 	/**
@@ -249,8 +305,8 @@ public class ConnectedDataStream<IN1, IN2> {
 	 * @return The transformed {@link ConnectedDataStream}
 	 */
 	public CoWindowDataStream<IN1, IN2> window(long windowSize1, long windowSize2,
-			long slideInterval1, long slideInterval2, TimeStamp<IN1> timeStamp1,
-			TimeStamp<IN2> timeStamp2) {
+			long slideInterval1, long slideInterval2, TimestampWrapper<IN1> timeStamp1,
+			TimestampWrapper<IN2> timeStamp2) {
 		if (windowSize1 < 1 || windowSize2 < 1) {
 			throw new IllegalArgumentException("Window size must be positive");
 		}
@@ -282,10 +338,12 @@ public class ConnectedDataStream<IN1, IN2> {
 	 *            second input data stream are slid by after each transformation
 	 * @return The transformed {@link ConnectedDataStream}
 	 */
+	@SuppressWarnings("unchecked")
 	public CoWindowDataStream<IN1, IN2> window(long windowSize1, long windowSize2,
 			long slideInterval1, long slideInterval2) {
 		return window(windowSize1, windowSize2, slideInterval1, slideInterval2,
-				new DefaultTimeStamp<IN1>(), new DefaultTimeStamp<IN2>());
+				(TimestampWrapper<IN1>) SystemTimestamp.getWrapper(),
+				(TimestampWrapper<IN2>) SystemTimestamp.getWrapper());
 	}
 
 	/**
@@ -309,7 +367,7 @@ public class ConnectedDataStream<IN1, IN2> {
 	 * @return The transformed {@link ConnectedDataStream}
 	 */
 	public CoWindowDataStream<IN1, IN2> window(long windowSize1, long windowSize2,
-			TimeStamp<IN1> timeStamp1, TimeStamp<IN2> timeStamp2) {
+			TimestampWrapper<IN1> timeStamp1, TimestampWrapper<IN2> timeStamp2) {
 		return window(windowSize1, windowSize2, windowSize1, windowSize2, timeStamp1, timeStamp2);
 	}
 
@@ -328,9 +386,11 @@ public class ConnectedDataStream<IN1, IN2> {
 	 *            milliseconds
 	 * @return The transformed {@link ConnectedDataStream}
 	 */
+	@SuppressWarnings("unchecked")
 	public CoWindowDataStream<IN1, IN2> window(long windowSize1, long windowSize2) {
 		return window(windowSize1, windowSize2, windowSize1, windowSize2,
-				new DefaultTimeStamp<IN1>(), new DefaultTimeStamp<IN2>());
+				(TimestampWrapper<IN1>) SystemTimestamp.getWrapper(),
+				(TimestampWrapper<IN2>) SystemTimestamp.getWrapper());
 	}
 
 	/**
@@ -348,15 +408,12 @@ public class ConnectedDataStream<IN1, IN2> {
 	 * @return The transformed {@link DataStream}
 	 */
 	public <OUT> SingleOutputStreamOperator<OUT, ?> map(CoMapFunction<IN1, IN2, OUT> coMapper) {
-		FunctionTypeWrapper<IN1> in1TypeWrapper = new FunctionTypeWrapper<IN1>(coMapper,
-				CoMapFunction.class, 0);
-		FunctionTypeWrapper<IN2> in2TypeWrapper = new FunctionTypeWrapper<IN2>(coMapper,
-				CoMapFunction.class, 1);
-		FunctionTypeWrapper<OUT> outTypeWrapper = new FunctionTypeWrapper<OUT>(coMapper,
-				CoMapFunction.class, 2);
+		TypeInformation<OUT> outTypeInfo = TypeExtractor.createTypeInfo(CoMapFunction.class,
+				coMapper.getClass(), 2, null, null);
 
-		return addCoFunction("coMap", coMapper, in1TypeWrapper, in2TypeWrapper, outTypeWrapper,
-				new CoMapInvokable<IN1, IN2, OUT>(coMapper));
+		return addCoFunction("coMap", outTypeInfo, new CoMapInvokable<IN1, IN2, OUT>(
+				clean(coMapper)));
+
 	}
 
 	/**
@@ -376,15 +433,11 @@ public class ConnectedDataStream<IN1, IN2> {
 	 */
 	public <OUT> SingleOutputStreamOperator<OUT, ?> flatMap(
 			CoFlatMapFunction<IN1, IN2, OUT> coFlatMapper) {
-		FunctionTypeWrapper<IN1> in1TypeWrapper = new FunctionTypeWrapper<IN1>(coFlatMapper,
-				CoFlatMapFunction.class, 0);
-		FunctionTypeWrapper<IN2> in2TypeWrapper = new FunctionTypeWrapper<IN2>(coFlatMapper,
-				CoFlatMapFunction.class, 1);
-		FunctionTypeWrapper<OUT> outTypeWrapper = new FunctionTypeWrapper<OUT>(coFlatMapper,
-				CoFlatMapFunction.class, 2);
+		TypeInformation<OUT> outTypeInfo = TypeExtractor.createTypeInfo(CoFlatMapFunction.class,
+				coFlatMapper.getClass(), 2, null, null);
 
-		return addCoFunction("coFlatMap", coFlatMapper, in1TypeWrapper, in2TypeWrapper,
-				outTypeWrapper, new CoFlatMapInvokable<IN1, IN2, OUT>(coFlatMapper));
+		return addCoFunction("coFlatMap", outTypeInfo, new CoFlatMapInvokable<IN1, IN2, OUT>(
+				clean(coFlatMapper)));
 	}
 
 	/**
@@ -405,14 +458,11 @@ public class ConnectedDataStream<IN1, IN2> {
 	 */
 	public <OUT> SingleOutputStreamOperator<OUT, ?> reduce(CoReduceFunction<IN1, IN2, OUT> coReducer) {
 
-		FunctionTypeWrapper<IN1> in1TypeWrapper = new FunctionTypeWrapper<IN1>(coReducer,
-				CoReduceFunction.class, 0);
-		FunctionTypeWrapper<IN2> in2TypeWrapper = new FunctionTypeWrapper<IN2>(coReducer,
-				CoReduceFunction.class, 1);
-		FunctionTypeWrapper<OUT> outTypeWrapper = new FunctionTypeWrapper<OUT>(coReducer,
-				CoReduceFunction.class, 2);
-		return addCoFunction("coReduce", coReducer, in1TypeWrapper, in2TypeWrapper, outTypeWrapper,
-				getReduceInvokable(coReducer));
+		TypeInformation<OUT> outTypeInfo = TypeExtractor.createTypeInfo(CoReduceFunction.class,
+				coReducer.getClass(), 2, null, null);
+
+		return addCoFunction("coReduce", outTypeInfo, getReduceInvokable(clean(coReducer)));
+
 	}
 
 	/**
@@ -433,10 +483,12 @@ public class ConnectedDataStream<IN1, IN2> {
 	 * 
 	 * @return The transformed {@link DataStream}.
 	 */
+	@SuppressWarnings("unchecked")
 	public <OUT> SingleOutputStreamOperator<OUT, ?> windowReduce(
 			CoWindowFunction<IN1, IN2, OUT> coWindowFunction, long windowSize, long slideInterval) {
 		return windowReduce(coWindowFunction, windowSize, slideInterval,
-				new DefaultTimeStamp<IN1>(), new DefaultTimeStamp<IN2>());
+				(TimestampWrapper<IN1>) SystemTimestamp.getWrapper(),
+				(TimestampWrapper<IN2>) SystemTimestamp.getWrapper());
 	}
 
 	/**
@@ -464,7 +516,7 @@ public class ConnectedDataStream<IN1, IN2> {
 	 */
 	public <OUT> SingleOutputStreamOperator<OUT, ?> windowReduce(
 			CoWindowFunction<IN1, IN2, OUT> coWindowFunction, long windowSize, long slideInterval,
-			TimeStamp<IN1> timestamp1, TimeStamp<IN2> timestamp2) {
+			TimestampWrapper<IN1> timestamp1, TimestampWrapper<IN2> timestamp2) {
 
 		if (windowSize < 1) {
 			throw new IllegalArgumentException("Window size must be positive");
@@ -473,62 +525,30 @@ public class ConnectedDataStream<IN1, IN2> {
 			throw new IllegalArgumentException("Slide interval must be positive");
 		}
 
-		FunctionTypeWrapper<IN1> in1TypeWrapper = new FunctionTypeWrapper<IN1>(coWindowFunction,
-				CoWindowFunction.class, 0);
-		FunctionTypeWrapper<IN2> in2TypeWrapper = new FunctionTypeWrapper<IN2>(coWindowFunction,
-				CoWindowFunction.class, 1);
-		FunctionTypeWrapper<OUT> outTypeWrapper = new FunctionTypeWrapper<OUT>(coWindowFunction,
-				CoWindowFunction.class, 2);
+		TypeInformation<OUT> outTypeInfo = TypeExtractor.createTypeInfo(CoWindowFunction.class,
+				coWindowFunction.getClass(), 2, null, null);
 
-		return addCoFunction("coWindowReduce", coWindowFunction, in1TypeWrapper, in2TypeWrapper,
-				outTypeWrapper, new CoWindowInvokable<IN1, IN2, OUT>(coWindowFunction, windowSize,
-						slideInterval, timestamp1, timestamp2));
+		return addCoFunction("coWindowReduce", outTypeInfo, new CoWindowInvokable<IN1, IN2, OUT>(
+				clean(coWindowFunction), windowSize, slideInterval, timestamp1, timestamp2));
+
 	}
 
 	protected <OUT> CoInvokable<IN1, IN2, OUT> getReduceInvokable(
 			CoReduceFunction<IN1, IN2, OUT> coReducer) {
 		CoReduceInvokable<IN1, IN2, OUT> invokable;
 		if (isGrouped) {
-			invokable = new CoGroupedReduceInvokable<IN1, IN2, OUT>(coReducer, keySelector1,
+			invokable = new CoGroupedReduceInvokable<IN1, IN2, OUT>(clean(coReducer), keySelector1,
 					keySelector2);
 		} else {
-			invokable = new CoReduceInvokable<IN1, IN2, OUT>(coReducer);
+			invokable = new CoReduceInvokable<IN1, IN2, OUT>(clean(coReducer));
 		}
 		return invokable;
 	}
 
-	SingleOutputStreamOperator<Tuple2<IN1, IN2>, ?> windowCross(long windowSize, long slideInterval) {
-		return windowCross(windowSize, slideInterval, new DefaultTimeStamp<IN1>(),
-				new DefaultTimeStamp<IN2>());
-	}
-
-	SingleOutputStreamOperator<Tuple2<IN1, IN2>, ?> windowCross(long windowSize,
-			long slideInterval, TimeStamp<IN1> timestamp1, TimeStamp<IN2> timestamp2) {
-
-		return addGeneralWindowJoin(new CrossWindowFunction<IN1, IN2>(), windowSize, slideInterval,
-				timestamp1, timestamp2);
-	}
-
-	SingleOutputStreamOperator<Tuple2<IN1, IN2>, ?> windowJoin(long windowSize, long slideInterval,
-			int fieldIn1, int fieldIn2) {
-
-		return windowJoin(windowSize, slideInterval, new DefaultTimeStamp<IN1>(),
-				new DefaultTimeStamp<IN2>(), fieldIn1, fieldIn2);
-	}
-
-	SingleOutputStreamOperator<Tuple2<IN1, IN2>, ?> windowJoin(long windowSize, long slideInterval,
-			TimeStamp<IN1> timestamp1, TimeStamp<IN2> timestamp2, int fieldIn1, int fieldIn2) {
-
-		JoinWindowFunction<IN1, IN2> joinWindowFunction = new JoinWindowFunction<IN1, IN2>(
-				dataStream1.getOutputType(), dataStream2.getOutputType(), fieldIn1, fieldIn2);
-
-		return addGeneralWindowJoin(joinWindowFunction, windowSize, slideInterval, timestamp1,
-				timestamp2);
-	}
-
-	private SingleOutputStreamOperator<Tuple2<IN1, IN2>, ?> addGeneralWindowJoin(
-			CoWindowFunction<IN1, IN2, Tuple2<IN1, IN2>> coWindowFunction, long windowSize,
-			long slideInterval, TimeStamp<IN1> timestamp1, TimeStamp<IN2> timestamp2) {
+	public <OUT> SingleOutputStreamOperator<OUT, ?> addGeneralWindowCombine(
+			CoWindowFunction<IN1, IN2, OUT> coWindowFunction, TypeInformation<OUT> outTypeInfo,
+			long windowSize, long slideInterval, TimestampWrapper<IN1> timestamp1,
+			TimestampWrapper<IN2> timestamp2) {
 
 		if (windowSize < 1) {
 			throw new IllegalArgumentException("Window size must be positive");
@@ -537,39 +557,21 @@ public class ConnectedDataStream<IN1, IN2> {
 			throw new IllegalArgumentException("Slide interval must be positive");
 		}
 
-		TypeWrapper<IN1> in1TypeWrapper = null;
-		TypeWrapper<IN2> in2TypeWrapper = null;
+		return addCoFunction("coWindowReduce", outTypeInfo, new CoWindowInvokable<IN1, IN2, OUT>(
+				clean(coWindowFunction), windowSize, slideInterval, timestamp1, timestamp2));
 
-		in1TypeWrapper = new ObjectTypeWrapper<IN1>(dataStream1.getOutputType().createSerializer()
-				.createInstance());
-		in2TypeWrapper = new ObjectTypeWrapper<IN2>(dataStream2.getOutputType().createSerializer()
-				.createInstance());
-
-		CombineTypeWrapper<IN1, IN2> outTypeWrapper = new CombineTypeWrapper<IN1, IN2>(
-				in1TypeWrapper, in2TypeWrapper);
-
-		return addCoFunction("coWindowReduce", coWindowFunction, in1TypeWrapper, in2TypeWrapper,
-				outTypeWrapper, new CoWindowInvokable<IN1, IN2, Tuple2<IN1, IN2>>(coWindowFunction,
-						windowSize, slideInterval, timestamp1, timestamp2));
 	}
 
-	protected <OUT> SingleOutputStreamOperator<OUT, ?> addCoFunction(String functionName,
-			final Function function, TypeWrapper<IN1> in1TypeWrapper,
-			TypeWrapper<IN2> in2TypeWrapper, TypeWrapper<OUT> outTypeWrapper,
-			CoInvokable<IN1, IN2, OUT> functionInvokable) {
+	public <OUT> SingleOutputStreamOperator<OUT, ?> addCoFunction(String functionName,
+			TypeInformation<OUT> outTypeInfo, CoInvokable<IN1, IN2, OUT> functionInvokable) {
 
 		@SuppressWarnings({ "unchecked", "rawtypes" })
 		SingleOutputStreamOperator<OUT, ?> returnStream = new SingleOutputStreamOperator(
-				environment, functionName, outTypeWrapper);
+				environment, functionName, outTypeInfo);
 
-		try {
-			dataStream1.jobGraphBuilder.addCoTask(returnStream.getId(), functionInvokable,
-					in1TypeWrapper, in2TypeWrapper, outTypeWrapper, functionName,
-					SerializationUtils.serialize((Serializable) function),
-					environment.getDegreeOfParallelism());
-		} catch (SerializationException e) {
-			throw new RuntimeException("Cannot serialize user defined function");
-		}
+		dataStream1.jobGraphBuilder.addCoTask(returnStream.getId(), functionInvokable,
+				getInputType1(), getInputType2(), outTypeInfo, functionName,
+				environment.getDegreeOfParallelism());
 
 		dataStream1.connectGraph(dataStream1, returnStream.getId(), 1);
 		dataStream1.connectGraph(dataStream2, returnStream.getId(), 2);

@@ -27,9 +27,16 @@ import static org.apache.flink.runtime.execution.ExecutionState.FINISHED;
 import static org.apache.flink.runtime.execution.ExecutionState.RUNNING;
 import static org.apache.flink.runtime.execution.ExecutionState.SCHEDULED;
 
+import java.io.Serializable;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
+import akka.dispatch.OnComplete;
+import akka.pattern.Patterns;
+import akka.util.Timeout;
+import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.runtime.JobException;
+import org.apache.flink.runtime.akka.AkkaUtils;
 import org.apache.flink.runtime.deployment.TaskDeploymentDescriptor;
 import org.apache.flink.runtime.execution.ExecutionState;
 import org.apache.flink.runtime.instance.AllocatedSlot;
@@ -41,11 +48,14 @@ import org.apache.flink.runtime.jobmanager.scheduler.Scheduler;
 import org.apache.flink.runtime.jobmanager.scheduler.SlotAllocationFuture;
 import org.apache.flink.runtime.jobmanager.scheduler.SlotAllocationFutureAction;
 import org.apache.flink.runtime.jobmanager.scheduler.SlotSharingGroup;
-import org.apache.flink.runtime.taskmanager.TaskOperationResult;
+import org.apache.flink.runtime.messages.TaskManagerMessages;
+import org.apache.flink.runtime.messages.TaskManagerMessages.TaskOperationResult;
 import org.apache.flink.util.ExceptionUtils;
 import org.slf4j.Logger;
 
 import com.google.common.base.Preconditions;
+import scala.concurrent.Future;
+import scala.concurrent.duration.FiniteDuration;
 
 /**
  * A single execution of a vertex. While an {@link ExecutionVertex} can be executed multiple times (for recovery,
@@ -65,7 +75,9 @@ import com.google.common.base.Preconditions;
  * occasional double-checking to ensure that the state after a completed call is as expected, and trigger correcting
  * actions if it is not. Many actions are also idempotent (like canceling).
  */
-public class Execution {
+public class Execution implements Serializable {
+
+	static final long serialVersionUID = 42L;
 
 	private static final AtomicReferenceFieldUpdater<Execution, ExecutionState> STATE_UPDATER =
 			AtomicReferenceFieldUpdater.newUpdater(Execution.class, ExecutionState.class, "state");
@@ -73,6 +85,9 @@ public class Execution {
 	private static final Logger LOG = ExecutionGraph.LOG;
 	
 	private static final int NUM_CANCEL_CALL_TRIES = 3;
+
+	public static FiniteDuration timeout = new FiniteDuration(
+			ConfigConstants.DEFAULT_AKKA_ASK_TIMEOUT, TimeUnit.SECONDS);
 	
 	// --------------------------------------------------------------------------------------------
 	
@@ -265,38 +280,36 @@ public class Execution {
 			
 			// register this execution at the execution graph, to receive call backs
 			vertex.getExecutionGraph().registerExecution(this);
-			
-			// we execute the actual deploy call in a concurrent action to prevent this call from blocking for long
-			Runnable deployaction = new Runnable() {
-	
-				@Override
-				public void run() {
-					try {
-						Instance instance = slot.getInstance();
 
-						TaskOperationResult result = instance.getTaskManagerProxy().submitTask(deployment);
-						if (result == null) {
+			Instance instance = slot.getInstance();
+			Future<Object> deployAction = Patterns.ask(instance.getTaskManager(),
+					new TaskManagerMessages.SubmitTask(deployment), new Timeout(timeout));
+
+			deployAction.onComplete(new OnComplete<Object>(){
+
+				@Override
+				public void onComplete(Throwable failure, Object success) throws Throwable {
+					if (failure != null) {
+						markFailed(failure);
+					} else {
+						TaskOperationResult result = (TaskOperationResult) success;
+						if (success == null) {
 							markFailed(new Exception("Failed to deploy the task to slot " + slot + ": TaskOperationResult was null"));
 						}
-						else if (!result.getExecutionId().equals(attemptId)) {
+						else if (!result.executionID().equals(attemptId)) {
 							markFailed(new Exception("Answer execution id does not match the request execution id."));
 						}
-						else if (result.isSuccess()) {
+						else if (result.success()) {
 							switchToRunning();
 						}
 						else {
 							// deployment failed :(
-							markFailed(new Exception("Failed to deploy the task " + getVertexWithAttempt() + " to slot " + slot + ": " + result.getDescription()));
+							markFailed(new Exception("Failed to deploy the task " +
+									getVertexWithAttempt() + " to slot " + slot + ": " + result.description()));
 						}
 					}
-					catch (Throwable t) {
-						// some error occurred. fail the task
-						markFailed(t);
-					}
 				}
-			};
-			
-			vertex.execute(deployaction);
+			}, AkkaUtils.globalExecutionContext());
 		}
 		catch (Throwable t) {
 			markFailed(t);
@@ -576,47 +589,28 @@ public class Execution {
 		if (slot == null) {
 			return;
 		}
-		
-		Runnable cancelAction = new Runnable() {
-			
+
+		Future<Object> cancelResult = AkkaUtils.retry(slot.getInstance().getTaskManager(), new
+				TaskManagerMessages.CancelTask(attemptId), NUM_CANCEL_CALL_TRIES,
+				AkkaUtils.globalExecutionContext(), timeout);
+
+		cancelResult.onComplete(new OnComplete<Object>(){
+
 			@Override
-			public void run() {
-				Throwable exception = null;
-				
-				for (int triesLeft = NUM_CANCEL_CALL_TRIES; triesLeft > 0; --triesLeft) {
-					
-					try {
-						// send the call. it may be that the task is not really there (asynchronous / overtaking messages)
-						// in which case it is fine (the deployer catches it)
-						TaskOperationResult result = slot.getInstance().getTaskManagerProxy().cancelTask(attemptId);
-						
-						if (!result.isSuccess()) {
-							// the task was not found, which may be when the task concurrently finishes or fails, or
-							// when the cancel call overtakes the deployment call
-							if (LOG.isDebugEnabled()) {
-								LOG.debug("Cancel task call did not find task. Probably RPC call race.");
-							}
-						}
-						
-						// in any case, we need not call multiple times, so we quit
-						return;
-					}
-					catch (Throwable t) {
-						if (exception == null) {
-							exception = t;
-						}
-						LOG.error("Canceling vertex " + getVertexWithAttempt() + " failed (" + triesLeft + " tries left): " + t.getMessage() , t);
+			public void onComplete(Throwable failure, Object success) throws Throwable {
+				if(failure != null){
+					fail(new Exception("Task could not be canceled.", failure));
+				}else{
+					TaskOperationResult result = (TaskOperationResult)success;
+					if(!result.success()){
+						LOG.debug("Cancel task call did not find task. Probably akka message call" +
+								" race.");
 					}
 				}
-				
-				// dang, utterly unsuccessful - the target node must be down, in which case the tasks are lost anyways
-				fail(new Exception("Task could not be canceled.", exception));
 			}
-		};
-		
-		vertex.execute(cancelAction);
+		}, AkkaUtils.globalExecutionContext());
 	}
-	
+
 	// --------------------------------------------------------------------------------------------
 	//  Miscellaneous
 	// --------------------------------------------------------------------------------------------

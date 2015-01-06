@@ -17,6 +17,7 @@
 
 package org.apache.flink.streaming.api.datastream;
 
+import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.streaming.api.function.co.CoReduceFunction;
 import org.apache.flink.streaming.api.invokable.operator.co.CoBatchReduceInvokable;
 import org.apache.flink.streaming.api.invokable.operator.co.CoGroupedBatchReduceInvokable;
@@ -83,15 +84,36 @@ public class CoBatchedDataStream<IN1, IN2> extends ConnectedDataStream<IN1, IN2>
 				dataStream2.groupBy(keyPosition2), batchSize1, batchSize2, slideSize1, slideSize2);
 	}
 
+	public ConnectedDataStream<IN1, IN2> groupBy(int[] keyPositions1, int[] keyPositions2) {
+		return new CoBatchedDataStream<IN1, IN2>(dataStream1.groupBy(keyPositions1),
+				dataStream2.groupBy(keyPositions2), batchSize1, batchSize2, slideSize1, slideSize2);
+	}
+
+	public ConnectedDataStream<IN1, IN2> groupBy(String field1, String field2) {
+		return new CoBatchedDataStream<IN1, IN2>(dataStream1.groupBy(field1),
+				dataStream2.groupBy(field2), batchSize1, batchSize2, slideSize1, slideSize2);
+	}
+
+	public ConnectedDataStream<IN1, IN2> groupBy(String[] fields1, String[] fields2) {
+		return new CoBatchedDataStream<IN1, IN2>(dataStream1.groupBy(fields1),
+				dataStream2.groupBy(fields2), batchSize1, batchSize2, slideSize1, slideSize2);
+	}
+
+	public ConnectedDataStream<IN1, IN2> groupBy(KeySelector<IN1, ?> keySelector1,
+			KeySelector<IN2, ?> keySelector2) {
+		return new CoBatchedDataStream<IN1, IN2>(dataStream1.groupBy(keySelector1),
+				dataStream2.groupBy(keySelector2), batchSize1, batchSize2, slideSize1, slideSize2);
+	}
+
 	@Override
 	protected <OUT> CoInvokable<IN1, IN2, OUT> getReduceInvokable(
 			CoReduceFunction<IN1, IN2, OUT> coReducer) {
 		CoBatchReduceInvokable<IN1, IN2, OUT> invokable;
 		if (isGrouped) {
-			invokable = new CoGroupedBatchReduceInvokable<IN1, IN2, OUT>(coReducer, batchSize1,
+			invokable = new CoGroupedBatchReduceInvokable<IN1, IN2, OUT>(clean(coReducer), batchSize1,
 					batchSize2, slideSize1, slideSize2, keySelector1, keySelector2);
 		} else {
-			invokable = new CoBatchReduceInvokable<IN1, IN2, OUT>(coReducer, batchSize1,
+			invokable = new CoBatchReduceInvokable<IN1, IN2, OUT>(clean(coReducer), batchSize1,
 					batchSize2, slideSize1, slideSize2);
 		}
 		return invokable;

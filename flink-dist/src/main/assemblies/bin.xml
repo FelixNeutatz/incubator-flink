@@ -50,8 +50,15 @@ under the License.
 		</dependencySet>
 	</dependencySets>
 
-	<fileSets>
+	<files>
+		<file>
+			<source>src/main/resources/flink-conf.yaml</source>
+			<outputDirectory>conf</outputDirectory>
+			<fileMode>0644</fileMode>
+		</file>
+	</files>
 
+	<fileSets>
 		<fileSet>
 			<!-- copy start scripts -->
 			<directory>src/main/flink-bin/bin</directory>
@@ -88,7 +95,6 @@ under the License.
 				<include>*.txt</include>
 				<include>LICENSE*</include>
 				<include>NOTICE*</include>
-				<include>DISCLAIMER*</include>
 			</includes>
 		</fileSet>
 
@@ -103,26 +109,6 @@ under the License.
 			<fileMode>0644</fileMode>
 		</fileSet>
 
-		<fileSet>
-			<!-- copy files for compiler web frontend -->
-			<directory>../flink-clients/resources</directory>
-			<outputDirectory>resources</outputDirectory>
-			<fileMode>0644</fileMode>
-			<excludes>
-				<exclude>*etc/users</exclude>
-			</excludes>
-		</fileSet>
-		
-		<fileSet>
-			<!-- copy files for Jobmanager web frontend -->
-			<directory>../flink-runtime/resources</directory>
-			<outputDirectory>resources</outputDirectory>
-			<fileMode>0644</fileMode>
-			<excludes>
-				<exclude>*etc/users</exclude>
-			</excludes>
-		</fileSet>
-		
 		<!-- copy the tools -->
 		<fileSet>
 			<directory>src/main/flink-bin/tools</directory>
@@ -143,36 +129,6 @@ under the License.
 				<exclude>original-flink-java-examples-${project.version}.jar</exclude>
 				<exclude>flink-java-examples-${project.version}-sources.jar</exclude>
 			</excludes>
-		</fileSet>
-
-		<fileSet>
-			<!-- copy jar files of scala examples -->
-			<directory>../flink-examples/flink-scala-examples/target</directory>
-			<outputDirectory>examples</outputDirectory>
-			<fileMode>0644</fileMode>
-			<includes>
-				<include>*.jar</include>
-			</includes>
-			<excludes>
-				<exclude>flink-scala-examples-${project.version}.jar</exclude>
-				<exclude>original-flink-scala-examples-${project.version}.jar</exclude>
-				<exclude>flink-scala-examples-${project.version}-sources.jar</exclude>
-				<exclude>flink-scala-examples-${project.version}-javadoc.jar</exclude>
-			</excludes>
-		</fileSet>
-
-		<fileSet>
-			<!-- copy java examples src -->
-			<directory>../flink-examples/flink-java-examples/src/main/java/org/apache/flink/example/java</directory>
-			<outputDirectory>examples/java-src/</outputDirectory>
-			<fileMode>0644</fileMode>
-		</fileSet>
-
-		<fileSet>
-			<!-- copy scala examples src -->
-			<directory>../flink-examples/flink-scala-examples/src/main/scala/org/apache/flink/examples/scala</directory>
-			<outputDirectory>examples/scala-src/</outputDirectory>
-			<fileMode>0644</fileMode>
 		</fileSet>
 
 	</fileSets>

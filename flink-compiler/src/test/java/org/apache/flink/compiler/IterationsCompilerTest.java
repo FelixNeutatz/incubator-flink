@@ -22,16 +22,18 @@ import static org.junit.Assert.*;
 
 import org.apache.flink.api.common.functions.RichFlatMapFunction;
 import org.junit.Test;
-
 import org.apache.flink.api.common.Plan;
 import org.apache.flink.api.java.DataSet;
 import org.apache.flink.api.java.operators.DeltaIteration;
 import org.apache.flink.api.java.ExecutionEnvironment;
 import org.apache.flink.api.java.operators.IterativeDataSet;
 import org.apache.flink.api.java.aggregation.Aggregations;
+import org.apache.flink.api.common.functions.FilterFunction;
+import org.apache.flink.api.common.functions.JoinFunction;
 import org.apache.flink.api.common.functions.RichGroupReduceFunction;
 import org.apache.flink.api.common.functions.RichJoinFunction;
 import org.apache.flink.api.common.functions.RichMapFunction;
+import org.apache.flink.api.common.operators.base.JoinOperatorBase.JoinHint;
 import org.apache.flink.api.java.functions.FunctionAnnotation.ConstantFields;
 import org.apache.flink.api.java.tuple.Tuple1;
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -40,6 +42,8 @@ import org.apache.flink.compiler.plan.Channel;
 import org.apache.flink.compiler.plan.OptimizedPlan;
 import org.apache.flink.compiler.plan.WorksetIterationPlanNode;
 import org.apache.flink.compiler.plandump.PlanJSONDumpGenerator;
+import org.apache.flink.compiler.plantranslate.NepheleJobGraphGenerator;
+import org.apache.flink.compiler.testfunctions.IdentityKeyExtractor;
 import org.apache.flink.compiler.testfunctions.IdentityMapper;
 import org.apache.flink.runtime.operators.shipping.ShipStrategyType;
 import org.apache.flink.util.Collector;
@@ -65,13 +69,17 @@ public class IterationsCompilerTest extends CompilerTestBase {
 			DataSet<Tuple2<Long, Long>> result =
 				invariantInput
 					.map(new IdentityMapper<Tuple2<Long, Long>>()).withBroadcastSet(iter.getWorkset(), "bc data")
-					.join(iter.getSolutionSet()).where(0).equalTo(1).projectFirst(1).projectSecond(1).types(Long.class, Long.class);
+					.join(iter.getSolutionSet()).where(0).equalTo(1).projectFirst(1).projectSecond(1);
 			
 			iter.closeWith(result.map(new IdentityMapper<Tuple2<Long,Long>>()), result).print();
 			
 			OptimizedPlan p = compileNoStats(env.createProgramPlan());
 			
+			// check that the JSON generator accepts this plan
 			new PlanJSONDumpGenerator().getOptimizerPlanAsJSON(p);
+			
+			// check that the JobGraphGenerator accepts the plan
+			new NepheleJobGraphGenerator().compileJobGraph(p);
 		}
 		catch (Exception e) {
 			e.printStackTrace();
@@ -107,6 +115,8 @@ public class IterationsCompilerTest extends CompilerTestBase {
 			
 			assertEquals(ShipStrategyType.PARTITION_HASH, wipn.getInput1().getShipStrategy());
 			assertTrue(wipn.getInput2().getTempMode().breaksPipeline());
+			
+			new NepheleJobGraphGenerator().compileJobGraph(op);
 		}
 		catch (Exception e) {
 			System.err.println(e.getMessage());
@@ -141,6 +151,8 @@ public class IterationsCompilerTest extends CompilerTestBase {
 			
 			assertEquals(ShipStrategyType.PARTITION_HASH, wipn.getInput1().getShipStrategy());
 			assertTrue(wipn.getInput2().getTempMode().breaksPipeline());
+			
+			new NepheleJobGraphGenerator().compileJobGraph(op);
 		}
 		catch (Exception e) {
 			System.err.println(e.getMessage());
@@ -175,6 +187,8 @@ public class IterationsCompilerTest extends CompilerTestBase {
 			
 			assertEquals(ShipStrategyType.FORWARD, wipn.getInput1().getShipStrategy());
 			assertTrue(wipn.getInput2().getTempMode().breaksPipeline());
+			
+			new NepheleJobGraphGenerator().compileJobGraph(op);
 		}
 		catch (Exception e) {
 			System.err.println(e.getMessage());
@@ -207,6 +221,8 @@ public class IterationsCompilerTest extends CompilerTestBase {
 			for (Channel c : bipn.getPartialSolutionPlanNode().getOutgoingChannels()) {
 				assertEquals(ShipStrategyType.PARTITION_HASH, c.getShipStrategy());
 			}
+			
+			new NepheleJobGraphGenerator().compileJobGraph(op);
 		}
 		catch (Exception e) {
 			System.err.println(e.getMessage());
@@ -214,6 +230,84 @@ public class IterationsCompilerTest extends CompilerTestBase {
 			fail(e.getMessage());
 		}
 	}
+	
+	@Test
+	public void testWorksetIterationPipelineBreakerPlacement() {
+		try {
+			ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
+			env.setDegreeOfParallelism(8);
+			
+			// the workset (input two of the delta iteration) is the same as what is consumed be the successive join
+			DataSet<Tuple2<Long, Long>> initialWorkset = env.readCsvFile("/some/file/path").types(Long.class).map(new DuplicateValue());
+			
+			DataSet<Tuple2<Long, Long>> initialSolutionSet = env.readCsvFile("/some/file/path").types(Long.class).map(new DuplicateValue());
+			
+			// trivial iteration, since we are interested in the inputs to the iteration
+			DeltaIteration<Tuple2<Long, Long>, Tuple2<Long, Long>> iteration = initialSolutionSet.iterateDelta(initialWorkset, 100, 0);
+			
+			DataSet<Tuple2<Long, Long>> next = iteration.getWorkset().map(new IdentityMapper<Tuple2<Long,Long>>());
+			
+			DataSet<Tuple2<Long, Long>> result = iteration.closeWith(next, next);
+			
+			initialWorkset
+				.join(result, JoinHint.REPARTITION_HASH_FIRST)
+				.where(0).equalTo(0)
+				.print();
+			
+			Plan p = env.createProgramPlan();
+			compileNoStats(p);
+		}
+		catch (Exception e) {
+			e.printStackTrace();
+			fail(e.getMessage());
+		}
+	}
+	
+	@Test
+	public void testResetPartialSolution() {
+		try {
+			ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
+			
+			DataSet<Long> width = env.generateSequence(1, 10);
+			DataSet<Long> update = env.generateSequence(1, 10);
+			DataSet<Long> lastGradient = env.generateSequence(1, 10);
+			
+			DataSet<Long> init = width.union(update).union(lastGradient);
+			
+			IterativeDataSet<Long> iteration = init.iterate(10);
+			
+			width = iteration.filter(new IdFilter<Long>());
+			update = iteration.filter(new IdFilter<Long>());
+			lastGradient = iteration.filter(new IdFilter<Long>());
+			
+			DataSet<Long> gradient = width.map(new IdentityMapper<Long>());
+			DataSet<Long> term = gradient.join(lastGradient)
+								.where(new IdentityKeyExtractor<Long>())
+								.equalTo(new IdentityKeyExtractor<Long>())
+								.with(new JoinFunction<Long, Long, Long>() {
+									public Long join(Long first, Long second) { return null; }
+								});
+			
+			update = update.map(new RichMapFunction<Long, Long>() {
+				public Long map(Long value) { return null; }
+			}).withBroadcastSet(term, "some-name");
+			
+			DataSet<Long> result = iteration.closeWith(width.union(update).union(lastGradient));
+			
+			result.print();
+			
+			Plan p = env.createProgramPlan();
+			OptimizedPlan op = compileNoStats(p);
+			
+			new NepheleJobGraphGenerator().compileJobGraph(op);
+		}
+		catch (Exception e) {
+			e.printStackTrace();
+			fail(e.getMessage());
+		}
+	}
+	
+	// --------------------------------------------------------------------------------------------
 	
 	public static DataSet<Tuple2<Long, Long>> doBulkIteration(DataSet<Tuple2<Long, Long>> vertices, DataSet<Tuple2<Long, Long>> edges) {
 		
@@ -236,12 +330,12 @@ public class IterationsCompilerTest extends CompilerTestBase {
 		DeltaIteration<Tuple2<Long, Long>, Tuple2<Long, Long>> depIteration = vertices.iterateDelta(vertices, 100, 0);
 				
 		DataSet<Tuple1<Long>> candidates = depIteration.getWorkset().join(edges).where(0).equalTo(0)
-				.projectSecond(1).types(Long.class);
+				.projectSecond(1);
 		
 		DataSet<Tuple1<Long>> grouped = candidates.groupBy(0).reduceGroup(new Reduce101());
 		
 		DataSet<Tuple2<Long, Long>> candidatesDependencies = 
-				grouped.join(edges).where(0).equalTo(1).projectSecond(0, 1).types(Long.class, Long.class);
+				grouped.join(edges).where(0).equalTo(1).projectSecond(0, 1);
 		
 		DataSet<Tuple2<Long, Long>> verticesWithNewComponents = 
 				candidatesDependencies.join(depIteration.getSolutionSet()).where(0).equalTo(0)
@@ -257,6 +351,8 @@ public class IterationsCompilerTest extends CompilerTestBase {
 		return depResult;
 		
 	}
+	
+	// --------------------------------------------------------------------------------------------
 	
 	public static final class Join222 extends RichJoinFunction<Tuple2<Long, Long>, Tuple2<Long, Long>, Tuple2<Long, Long>> {
 
@@ -301,6 +397,13 @@ public class IterationsCompilerTest extends CompilerTestBase {
 		@Override
 		public Tuple2<T, T> map(T value) {
 			return new Tuple2<T, T>(value, value);
+		}
+	}
+	
+	public static final class IdFilter<T> implements FilterFunction<T> {
+		@Override
+		public boolean filter(T value) {
+			return true;
 		}
 	}
 }

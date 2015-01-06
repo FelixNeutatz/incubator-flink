@@ -18,15 +18,11 @@
 
 package org.apache.flink.test.iterative.nephele;
 
-import java.io.IOException;
 
 import org.apache.flink.api.common.io.FileInputFormat;
 import org.apache.flink.api.common.io.InputFormat;
 import org.apache.flink.api.common.operators.util.UserCodeObjectWrapper;
 import org.apache.flink.api.common.operators.util.UserCodeWrapper;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.runtime.client.JobClient;
-import org.apache.flink.runtime.client.JobExecutionException;
 import org.apache.flink.runtime.io.network.channels.ChannelType;
 import org.apache.flink.runtime.iterative.task.IterationSynchronizationSinkTask;
 import org.apache.flink.runtime.jobgraph.AbstractJobVertex;
@@ -44,12 +40,6 @@ public class JobGraphUtils {
 	public static final long MEGABYTE = 1024l * 1024l;
 
 	private JobGraphUtils() {}
-	
-
-	public static void submit(JobGraph graph, Configuration nepheleConfig) throws IOException, JobExecutionException {
-		JobClient client = new JobClient(graph, nepheleConfig, JobGraphUtils.class.getClassLoader());
-		client.submitJobAndWait();
-	}
 	
 	public static <T extends FileInputFormat<?>> InputFormatVertex createInput(T stub, String path, String name, JobGraph graph,
 			int degreeOfParallelism)

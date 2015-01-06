@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,15 +21,15 @@ import org.apache.commons.lang3.Validate
 import org.apache.flink.api.common.InvalidProgramException
 import org.apache.flink.api.common.functions.{JoinFunction, RichFlatJoinFunction, FlatJoinFunction}
 import org.apache.flink.api.common.typeutils.TypeSerializer
-import org.apache.flink.api.common.operators.base.JoinOperatorBase.JoinHint;
+import org.apache.flink.api.common.operators.base.JoinOperatorBase.JoinHint
 import org.apache.flink.api.java.operators.JoinOperator.DefaultJoin.WrappingFlatJoinFunction
-import org.apache.flink.api.java.operators.JoinOperator.EquiJoin;
+import org.apache.flink.api.java.operators.JoinOperator.EquiJoin
 import org.apache.flink.api.java.operators._
 import org.apache.flink.api.scala.typeutils.{CaseClassSerializer, CaseClassTypeInfo}
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.util.Collector
-
 import scala.reflect.ClassTag
+import org.apache.flink.api.common.functions.Partitioner
 
 /**
  * A specific [[DataSet]] that results from a `join` operation. The result of a default join is a
@@ -66,6 +66,8 @@ class JoinDataSet[L, R](
     rightKeys: Keys[R])
   extends DataSet(defaultJoin) {
 
+  private var customPartitioner : Partitioner[_] = _
+  
   /**
    * Creates a new [[DataSet]] where the result for each pair of joined elements is the result
    * of the given function.
@@ -73,8 +75,9 @@ class JoinDataSet[L, R](
   def apply[O: TypeInformation: ClassTag](fun: (L, R) => O): DataSet[O] = {
     Validate.notNull(fun, "Join function must not be null.")
     val joiner = new FlatJoinFunction[L, R, O] {
+      val cleanFun = clean(fun)
       def join(left: L, right: R, out: Collector[O]) = {
-        out.collect(fun(left, right))
+        out.collect(cleanFun(left, right))
       }
     }
     val joinOperator = new EquiJoin[L, R, O](
@@ -84,9 +87,14 @@ class JoinDataSet[L, R](
       rightKeys,
       joiner,
       implicitly[TypeInformation[O]],
-      defaultJoin.getJoinHint)
-
-    wrap(joinOperator)
+      defaultJoin.getJoinHint,
+      getCallLocationName())
+    
+    if (customPartitioner != null) {
+      wrap(joinOperator.withPartitioner(customPartitioner))
+    } else {
+      wrap(joinOperator)
+    }
   }
 
   /**
@@ -97,8 +105,9 @@ class JoinDataSet[L, R](
   def apply[O: TypeInformation: ClassTag](fun: (L, R, Collector[O]) => Unit): DataSet[O] = {
     Validate.notNull(fun, "Join function must not be null.")
     val joiner = new FlatJoinFunction[L, R, O] {
+      val cleanFun = clean(fun)
       def join(left: L, right: R, out: Collector[O]) = {
-        fun(left, right, out)
+        cleanFun(left, right, out)
       }
     }
     val joinOperator = new EquiJoin[L, R, O](
@@ -108,9 +117,14 @@ class JoinDataSet[L, R](
       rightKeys,
       joiner,
       implicitly[TypeInformation[O]],
-      defaultJoin.getJoinHint)
+      defaultJoin.getJoinHint,
+      getCallLocationName())
 
-    wrap(joinOperator)
+    if (customPartitioner != null) {
+      wrap(joinOperator.withPartitioner(customPartitioner))
+    } else {
+      wrap(joinOperator)
+    }
   }
 
   /**
@@ -131,9 +145,14 @@ class JoinDataSet[L, R](
       rightKeys,
       joiner,
       implicitly[TypeInformation[O]],
-      defaultJoin.getJoinHint)
+      defaultJoin.getJoinHint,
+      getCallLocationName())
 
-    wrap(joinOperator)
+    if (customPartitioner != null) {
+      wrap(joinOperator.withPartitioner(customPartitioner))
+    } else {
+      wrap(joinOperator)
+    }
   }
 
   /**
@@ -155,9 +174,38 @@ class JoinDataSet[L, R](
       rightKeys,
       generatedFunction, fun,
       implicitly[TypeInformation[O]],
-      defaultJoin.getJoinHint)
+      defaultJoin.getJoinHint,
+      getCallLocationName())
 
-    wrap(joinOperator)
+    if (customPartitioner != null) {
+      wrap(joinOperator.withPartitioner(customPartitioner))
+    } else {
+      wrap(joinOperator)
+    }
+  }
+  
+  // ----------------------------------------------------------------------------------------------
+  //  Properties
+  // ----------------------------------------------------------------------------------------------
+  
+  def withPartitioner[K : TypeInformation](partitioner : Partitioner[K]) : JoinDataSet[L, R] = {
+    if (partitioner != null) {
+      val typeInfo : TypeInformation[K] = implicitly[TypeInformation[K]]
+      
+      leftKeys.validateCustomPartitioner(partitioner, typeInfo)
+      rightKeys.validateCustomPartitioner(partitioner, typeInfo)
+    }
+    this.customPartitioner = partitioner
+    defaultJoin.withPartitioner(partitioner)
+    
+    this
+  }
+
+  /**
+   * Gets the custom partitioner used by this join, or null, if none is set.
+   */
+  def getPartitioner[K]() : Partitioner[K] = {
+    customPartitioner.asInstanceOf[Partitioner[K]]
   }
 }
 
@@ -202,7 +250,8 @@ class UnfinishedJoinOperation[L, R](
       }
     }
     val joinOperator = new EquiJoin[L, R, (L, R)](
-      leftSet.javaSet, rightSet.javaSet, leftKey, rightKey, joiner, returnType, joinHint)
+      leftSet.javaSet, rightSet.javaSet, leftKey, rightKey, joiner, returnType, joinHint,
+        getCallLocationName())
 
     new JoinDataSet(joinOperator, leftSet, rightSet, leftKey, rightKey)
   }

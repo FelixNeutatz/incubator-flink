@@ -25,7 +25,6 @@ import java.io.IOException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import org.apache.flink.runtime.instance.InstanceConnectionInfo;
 import org.apache.flink.runtime.profiling.ProfilingException;
 import org.apache.flink.runtime.profiling.impl.types.InternalInstanceProfilingData;
 import org.apache.flink.util.StringUtils;
@@ -50,7 +49,7 @@ public class InstanceProfiler {
 
 	private static final int PERCENT = 100;
 
-	private final InstanceConnectionInfo instanceConnectionInfo;
+	private final String instancePath;
 
 	private long lastTimestamp = 0;
 
@@ -76,21 +75,21 @@ public class InstanceProfiler {
 
 	private long firstTimestamp;
 
-	public InstanceProfiler(InstanceConnectionInfo instanceConnectionInfo)
+	public InstanceProfiler(String instancePath)
 																			throws ProfilingException {
 
-		this.instanceConnectionInfo = instanceConnectionInfo;
+		this.instancePath = instancePath;
 		this.firstTimestamp = System.currentTimeMillis();
 		// Initialize counters by calling generateProfilingData once and ignore the return value
 		generateProfilingData(this.firstTimestamp);
 	}
 
-	InternalInstanceProfilingData generateProfilingData(long timestamp) throws ProfilingException {
+	public InternalInstanceProfilingData generateProfilingData(long timestamp) throws ProfilingException {
 
 		final long profilingInterval = timestamp - lastTimestamp;
 
 		final InternalInstanceProfilingData profilingData = new InternalInstanceProfilingData(
-			this.instanceConnectionInfo, (int) profilingInterval);
+			this.instancePath, (int) profilingInterval);
 
 		updateCPUUtilization(profilingData);
 		updateMemoryUtilization(profilingData);
@@ -332,7 +331,7 @@ public class InstanceProfiler {
 		final long profilingInterval = System.currentTimeMillis() - this.firstTimestamp;
 
 		final InternalInstanceProfilingData profilingData = new InternalInstanceProfilingData(
-			this.instanceConnectionInfo, (int) profilingInterval);
+			this.instancePath, (int) profilingInterval);
 
 		updateCPUUtilization(profilingData);
 		updateMemoryUtilization(profilingData);

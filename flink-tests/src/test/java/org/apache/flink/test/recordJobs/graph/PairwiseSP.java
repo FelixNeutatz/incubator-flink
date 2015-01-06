@@ -16,7 +16,6 @@
  * limitations under the License.
  */
 
-
 package org.apache.flink.test.recordJobs.graph;
 
 import java.io.IOException;
@@ -58,9 +57,8 @@ import org.apache.flink.util.Collector;
  * 2) The programs text-serialization for paths (see @see PathInFormat and @see PathOutFormat). 
  * 
  * The RDF input format is used if the 4th parameter of the getPlan() method is set to "true". If set to "false" the path input format is used. 
- *  
- *
  */
+@SuppressWarnings("deprecation")
 public class PairwiseSP implements Program, ProgramDescription {
 
 	private static final long serialVersionUID = 1L;
@@ -199,7 +197,7 @@ public class PairwiseSP implements Program, ProgramDescription {
 			line.append(record.getField(4, StringValue.class).toString());
 			line.append("|");
 			line.append("\n");
-			
+
 			stream.write(line.toString().getBytes());
 		}
 	}
@@ -392,7 +390,7 @@ public class PairwiseSP implements Program, ProgramDescription {
 		int numSubTasks   = (args.length > 0 ? Integer.parseInt(args[0]) : 1);
 		String paths     = (args.length > 1 ? args[1] : "");
 		String output    = (args.length > 2 ? args[2] : "");
-		boolean rdfInput = (args.length > 3 ? Boolean.parseBoolean(args[3]) : false);
+		boolean rdfInput = (args.length > 3 && Boolean.parseBoolean(args[3]));
 
 		FileDataSource pathsInput;
 		

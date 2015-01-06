@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,7 +20,7 @@ package org.apache.flink.api.scala
 import java.util.UUID
 
 import org.apache.commons.lang3.Validate
-import org.apache.flink.api.common.JobExecutionResult
+import org.apache.flink.api.common.{ExecutionConfig, JobExecutionResult}
 import org.apache.flink.api.java.io._
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo
@@ -28,7 +28,8 @@ import org.apache.flink.api.java.typeutils.{ValueTypeInfo, TupleTypeInfoBase}
 import org.apache.flink.api.scala.operators.ScalaCsvInputFormat
 import org.apache.flink.core.fs.Path
 
-import org.apache.flink.api.java.{ExecutionEnvironment => JavaEnv, CollectionEnvironment}
+import org.apache.flink.api.java.{ExecutionEnvironment => JavaEnv,
+CollectionEnvironment}
 import org.apache.flink.api.common.io.{InputFormat, FileInputFormat}
 
 import org.apache.flink.api.java.operators.DataSource
@@ -59,6 +60,19 @@ import scala.reflect.ClassTag
  *  be created.
  */
 class ExecutionEnvironment(javaEnv: JavaEnv) {
+  /**
+   * Sets the config object.
+   */
+  def setConfig(config: ExecutionConfig): Unit = {
+    javaEnv.setConfig(config)
+  }
+
+  /**
+   * Gets the config object.
+   */
+  def getConfig: ExecutionConfig = {
+    javaEnv.getConfig
+  }
 
   /**
    * Sets the degree of parallelism (DOP) for operations executed through this environment.
@@ -118,7 +132,8 @@ class ExecutionEnvironment(javaEnv: JavaEnv) {
     Validate.notNull(filePath, "The file path may not be null.")
     val format = new TextInputFormat(new Path(filePath))
     format.setCharsetName(charsetName)
-    val source = new DataSource[String](javaEnv, format, BasicTypeInfo.STRING_TYPE_INFO)
+    val source = new DataSource[String](javaEnv, format, BasicTypeInfo.STRING_TYPE_INFO,
+      getCallLocationName())
     wrap(source)
   }
 
@@ -139,7 +154,7 @@ class ExecutionEnvironment(javaEnv: JavaEnv) {
     val format = new TextValueInputFormat(new Path(filePath))
     format.setCharsetName(charsetName)
     val source = new DataSource[StringValue](
-      javaEnv, format, new ValueTypeInfo[StringValue](classOf[StringValue]))
+      javaEnv, format, new ValueTypeInfo[StringValue](classOf[StringValue]), getCallLocationName())
     wrap(source)
   }
 
@@ -154,6 +169,7 @@ class ExecutionEnvironment(javaEnv: JavaEnv) {
    * @param lineDelimiter The string that separates lines, defaults to newline.
    * @param fieldDelimiter The char that separates individual fields, defaults to ','.
    * @param ignoreFirstLine Whether the first line in the file should be ignored.
+   * @param ignoreComments Lines that start with the given String are ignored, disabled by default.
    * @param lenient Whether the parser should silently ignore malformed lines.
    * @param includedFields The fields in the file that should be read. Per default all fields
    *                       are read.
@@ -163,6 +179,7 @@ class ExecutionEnvironment(javaEnv: JavaEnv) {
       lineDelimiter: String = "\n",
       fieldDelimiter: Char = ',',
       ignoreFirstLine: Boolean = false,
+      ignoreComments: String = null,
       lenient: Boolean = false,
       includedFields: Array[Int] = null): DataSet[T] = {
 
@@ -173,6 +190,7 @@ class ExecutionEnvironment(javaEnv: JavaEnv) {
     inputFormat.setFieldDelimiter(fieldDelimiter)
     inputFormat.setSkipFirstLineAsHeader(ignoreFirstLine)
     inputFormat.setLenient(lenient)
+    inputFormat.setCommentPrefix(ignoreComments)
 
     val classes: Array[Class[_]] = new Array[Class[_]](typeInfo.getArity)
     for (i <- 0 until typeInfo.getArity) {
@@ -186,7 +204,30 @@ class ExecutionEnvironment(javaEnv: JavaEnv) {
       inputFormat.setFieldTypes(classes)
     }
 
-    wrap(new DataSource[T](javaEnv, inputFormat, typeInfo))
+    wrap(new DataSource[T](javaEnv, inputFormat, typeInfo, getCallLocationName()))
+  }
+
+  /**
+   * Creates a DataSet that represents the primitive type produced by reading the
+   * given file in delimited way.This method is similar to [[readCsvFile]] with
+   * single field, but it produces a DataSet not through Tuple.
+   * The type parameter must be used to specify the primitive type.
+   *
+   * @param filePath The path of the file, as a URI (e.g., "file:///some/local/file" or
+   *                 "hdfs://host:port/file/path").
+   * @param delimiter The string that separates primitives , defaults to newline.
+   */
+  def readFileOfPrimitives[T : ClassTag : TypeInformation](
+      filePath : String,
+      delimiter : String = "\n") : DataSet[T] = {
+    Validate.notNull(filePath, "File path must not be null.")
+    val typeInfo = implicitly[TypeInformation[T]]
+    val datasource = new DataSource[T](
+      javaEnv,
+      new PrimitiveInputFormat(new Path(filePath), delimiter, typeInfo.getTypeClass),
+      typeInfo,
+      getCallLocationName())
+    wrap(datasource)
   }
 
   /**
@@ -224,7 +265,7 @@ class ExecutionEnvironment(javaEnv: JavaEnv) {
       throw new IllegalArgumentException("InputFormat must not be null.")
     }
     Validate.notNull(producedType, "Produced type must not be null")
-    wrap(new DataSource[T](javaEnv, inputFormat, producedType))
+    wrap(new DataSource[T](javaEnv, inputFormat, producedType, getCallLocationName()))
   }
 
   /**
@@ -243,7 +284,8 @@ class ExecutionEnvironment(javaEnv: JavaEnv) {
     val dataSource = new DataSource[T](
       javaEnv,
       new CollectionInputFormat[T](data.asJavaCollection, typeInfo.createSerializer),
-      typeInfo)
+      typeInfo,
+      getCallLocationName())
     wrap(dataSource)
   }
 
@@ -262,7 +304,8 @@ class ExecutionEnvironment(javaEnv: JavaEnv) {
     val dataSource = new DataSource[T](
       javaEnv,
       new IteratorInputFormat[T](data.asJava),
-      typeInfo)
+      typeInfo,
+      getCallLocationName())
     wrap(dataSource)
   }
 
@@ -288,7 +331,10 @@ class ExecutionEnvironment(javaEnv: JavaEnv) {
   def fromParallelCollection[T: ClassTag : TypeInformation](
       iterator: SplittableIterator[T]): DataSet[T] = {
     val typeInfo = implicitly[TypeInformation[T]]
-    wrap(new DataSource[T](javaEnv, new ParallelIteratorInputFormat[T](iterator), typeInfo))
+    wrap(new DataSource[T](javaEnv,
+      new ParallelIteratorInputFormat[T](iterator),
+      typeInfo,
+      getCallLocationName()))
   }
 
   /**
@@ -303,7 +349,8 @@ class ExecutionEnvironment(javaEnv: JavaEnv) {
     val source = new DataSource(
       javaEnv,
       new ParallelIteratorInputFormat[java.lang.Long](iterator),
-      BasicTypeInfo.LONG_TYPE_INFO)
+      BasicTypeInfo.LONG_TYPE_INFO,
+      getCallLocationName())
     wrap(source).asInstanceOf[DataSet[Long]]
   }
 

@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.UUID;
 
 import org.apache.commons.lang3.Validate;
+import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.InvalidProgramException;
 import org.apache.flink.api.common.JobExecutionResult;
 import org.apache.flink.api.common.Plan;
@@ -41,6 +42,7 @@ import org.apache.flink.api.java.io.CollectionInputFormat;
 import org.apache.flink.api.java.io.CsvReader;
 import org.apache.flink.api.java.io.IteratorInputFormat;
 import org.apache.flink.api.java.io.ParallelIteratorInputFormat;
+import org.apache.flink.api.java.io.PrimitiveInputFormat;
 import org.apache.flink.api.java.io.TextInputFormat;
 import org.apache.flink.api.java.io.TextValueInputFormat;
 import org.apache.flink.api.java.operators.DataSink;
@@ -78,7 +80,7 @@ import org.apache.flink.util.SplittableIterator;
 public abstract class ExecutionEnvironment {
 	
 	/** The environment of the context (local by default, cluster if invoked through command line) */
-	private static ExecutionEnvironment contextEnvironment;
+	private static ExecutionEnvironmentFactory contextEnvironmentFactory;
 	
 	/** The default parallelism used by local environments */
 	private static int defaultLocalDop = Runtime.getRuntime().availableProcessors();
@@ -94,9 +96,7 @@ public abstract class ExecutionEnvironment {
 	
 	private final List<Tuple2<String, DistributedCacheEntry>> cacheFile = new ArrayList<Tuple2<String, DistributedCacheEntry>>();
 
-	private int degreeOfParallelism = -1;
-	
-	private int numberOfExecutionRetries = -1;
+	private ExecutionConfig config = new ExecutionConfig();
 	
 	
 	// --------------------------------------------------------------------------------------------
@@ -109,7 +109,22 @@ public abstract class ExecutionEnvironment {
 	protected ExecutionEnvironment() {
 		this.executionId = UUID.randomUUID();
 	}
-	
+
+	/**
+	 * Sets the config object.
+	 */
+	public void setConfig(ExecutionConfig config) {
+		Validate.notNull(config);
+		this.config = config;
+	}
+
+	/**
+	 * Gets the config object.
+	 */
+	public ExecutionConfig getConfig() {
+		return config;
+	}
+
 	/**
 	 * Gets the degree of parallelism with which operation are executed by default. Operations can
 	 * individually override this value to use a specific degree of parallelism via
@@ -122,7 +137,7 @@ public abstract class ExecutionEnvironment {
 	 *         returns {@code -1}, if the environments default parallelism should be used.
 	 */
 	public int getDegreeOfParallelism() {
-		return degreeOfParallelism;
+		return config.getDegreeOfParallelism();
 	}
 	
 	/**
@@ -138,11 +153,7 @@ public abstract class ExecutionEnvironment {
 	 * @param degreeOfParallelism The degree of parallelism
 	 */
 	public void setDegreeOfParallelism(int degreeOfParallelism) {
-		if (degreeOfParallelism < 1) {
-			throw new IllegalArgumentException("Degree of parallelism must be at least one.");
-		}
-		
-		this.degreeOfParallelism = degreeOfParallelism;
+		config.setDegreeOfParallelism(degreeOfParallelism);
 	}
 	
 	/**
@@ -153,10 +164,7 @@ public abstract class ExecutionEnvironment {
 	 * @param numberOfExecutionRetries The number of times the system will try to re-execute failed tasks.
 	 */
 	public void setNumberOfExecutionRetries(int numberOfExecutionRetries) {
-		if (numberOfExecutionRetries < -1) {
-			throw new IllegalArgumentException("The number of execution retries must be non-negative, or -1 (use system default)");
-		}
-		this.numberOfExecutionRetries = numberOfExecutionRetries;
+		config.setNumberOfExecutionRetries(numberOfExecutionRetries);
 	}
 	
 	/**
@@ -167,7 +175,7 @@ public abstract class ExecutionEnvironment {
 	 * @return The number of times the system will try to re-execute failed tasks.
 	 */
 	public int getNumberOfExecutionRetries() {
-		return numberOfExecutionRetries;
+		return config.getNumberOfExecutionRetries();
 	}
 	
 	/**
@@ -207,7 +215,7 @@ public abstract class ExecutionEnvironment {
 	public DataSource<String> readTextFile(String filePath) {
 		Validate.notNull(filePath, "The file path may not be null.");
 		
-		return new DataSource<String>(this, new TextInputFormat(new Path(filePath)), BasicTypeInfo.STRING_TYPE_INFO );
+		return new DataSource<String>(this, new TextInputFormat(new Path(filePath)), BasicTypeInfo.STRING_TYPE_INFO, Utils.getCallLocationName());
 	}
 	
 	/**
@@ -223,7 +231,7 @@ public abstract class ExecutionEnvironment {
 
 		TextInputFormat format = new TextInputFormat(new Path(filePath));
 		format.setCharsetName(charsetName);
-		return new DataSource<String>(this, format, BasicTypeInfo.STRING_TYPE_INFO );
+		return new DataSource<String>(this, format, BasicTypeInfo.STRING_TYPE_INFO, Utils.getCallLocationName());
 	}
 	
 	// -------------------------- Text Input Format With String Value------------------------------
@@ -242,7 +250,7 @@ public abstract class ExecutionEnvironment {
 	public DataSource<StringValue> readTextFileWithValue(String filePath) {
 		Validate.notNull(filePath, "The file path may not be null.");
 		
-		return new DataSource<StringValue>(this, new TextValueInputFormat(new Path(filePath)), new ValueTypeInfo<StringValue>(StringValue.class) );
+		return new DataSource<StringValue>(this, new TextValueInputFormat(new Path(filePath)), new ValueTypeInfo<StringValue>(StringValue.class), Utils.getCallLocationName());
 	}
 	
 	/**
@@ -265,9 +273,42 @@ public abstract class ExecutionEnvironment {
 		TextValueInputFormat format = new TextValueInputFormat(new Path(filePath));
 		format.setCharsetName(charsetName);
 		format.setSkipInvalidLines(skipInvalidLines);
-		return new DataSource<StringValue>(this, format, new ValueTypeInfo<StringValue>(StringValue.class) );
+		return new DataSource<StringValue>(this, format, new ValueTypeInfo<StringValue>(StringValue.class), Utils.getCallLocationName());
 	}
-	
+
+	// ----------------------------------- Primitive Input Format ---------------------------------------
+
+	/**
+	 * Creates a DataSet that represents the primitive type produced by reading the given file line wise.
+	 * This method is similar to {@link #readCsvFile(String)} with single field, but it produces a DataSet not through
+	 * {@link org.apache.flink.api.java.tuple.Tuple1}.
+	 *
+	 * @param filePath The path of the file, as a URI (e.g., "file:///some/local/file" or "hdfs://host:port/file/path").
+	 * @param typeClass The primitive type class to be read.
+	 * @return A DataSet that represents the data read from the given file as primitive type.
+	 */
+	public <X> DataSource<X> readFileOfPrimitives(String filePath, Class<X> typeClass) {
+		Validate.notNull(filePath, "The file path may not be null.");
+
+		return new DataSource<X>(this, new PrimitiveInputFormat<X>(new Path(filePath), typeClass), TypeExtractor.getForClass(typeClass), Utils.getCallLocationName());
+	}
+
+	/**
+	 * Creates a DataSet that represents the primitive type produced by reading the given file in delimited way.
+	 * This method is similar to {@link #readCsvFile(String)} with single field, but it produces a DataSet not through
+	 * {@link org.apache.flink.api.java.tuple.Tuple1}.
+	 *
+	 * @param filePath The path of the file, as a URI (e.g., "file:///some/local/file" or "hdfs://host:port/file/path").
+	 * @param delimiter The delimiter of the given file.
+	 * @param typeClass The primitive type class to be read.
+	 * @return A DataSet that represents the data read from the given file as primitive type.
+	 */
+	public <X> DataSource<X> readFileOfPrimitives(String filePath, String delimiter, Class<X> typeClass) {
+		Validate.notNull(filePath, "The file path may not be null.");
+
+		return new DataSource<X>(this, new PrimitiveInputFormat<X>(new Path(filePath), delimiter, typeClass), TypeExtractor.getForClass(typeClass), Utils.getCallLocationName());
+	}
+
 	// ----------------------------------- CSV Input Format ---------------------------------------
 	
 	/**
@@ -357,7 +398,7 @@ public abstract class ExecutionEnvironment {
 			throw new IllegalArgumentException("Produced type information must not be null.");
 		}
 		
-		return new DataSource<X>(this, inputFormat, producedType);
+		return new DataSource<X>(this, inputFormat, producedType, Utils.getCallLocationName());
 	}
 	
 	// ----------------------------------- Collection ---------------------------------------
@@ -390,7 +431,9 @@ public abstract class ExecutionEnvironment {
 		
 		X firstValue = data.iterator().next();
 		
-		return fromCollection(data, TypeExtractor.getForObject(firstValue));
+		TypeInformation<X> type = TypeExtractor.getForObject(firstValue);
+		CollectionInputFormat.checkCollection(data, type.getTypeClass());
+		return new DataSource<X>(this, new CollectionInputFormat<X>(data, type.createSerializer()), type, Utils.getCallLocationName());
 	}
 	
 	/**
@@ -411,9 +454,13 @@ public abstract class ExecutionEnvironment {
 	 * @see #fromCollection(Collection)
 	 */
 	public <X> DataSource<X> fromCollection(Collection<X> data, TypeInformation<X> type) {
+		return fromCollection(data, type, Utils.getCallLocationName());
+	}
+	
+	private <X> DataSource<X> fromCollection(Collection<X> data, TypeInformation<X> type, String callLocationName) {
 		CollectionInputFormat.checkCollection(data, type.getTypeClass());
 		
-		return new DataSource<X>(this, new CollectionInputFormat<X>(data, type.createSerializer()), type);
+		return new DataSource<X>(this, new CollectionInputFormat<X>(data, type.createSerializer()), type, callLocationName);
 	}
 	
 	/**
@@ -462,7 +509,7 @@ public abstract class ExecutionEnvironment {
 			throw new IllegalArgumentException("The iterator must be serializable.");
 		}
 		
-		return new DataSource<X>(this, new IteratorInputFormat<X>(data), type);
+		return new DataSource<X>(this, new IteratorInputFormat<X>(data), type, Utils.getCallLocationName());
 	}
 	
 	
@@ -490,7 +537,7 @@ public abstract class ExecutionEnvironment {
 			throw new IllegalArgumentException("The number of elements must not be zero.");
 		}
 		
-		return fromCollection(Arrays.asList(data), TypeExtractor.getForObject(data[0]));
+		return fromCollection(Arrays.asList(data), TypeExtractor.getForObject(data[0]), Utils.getCallLocationName());
 	}
 	
 	
@@ -532,7 +579,12 @@ public abstract class ExecutionEnvironment {
 	 * @see #fromParallelCollection(SplittableIterator, Class)
 	 */
 	public <X> DataSource<X> fromParallelCollection(SplittableIterator<X> iterator, TypeInformation<X> type) {
-		return new DataSource<X>(this, new ParallelIteratorInputFormat<X>(iterator), type);
+		return fromParallelCollection(iterator, type, Utils.getCallLocationName());
+	}
+	
+	// private helper for passing different call location names
+	private <X> DataSource<X> fromParallelCollection(SplittableIterator<X> iterator, TypeInformation<X> type, String callLocationName) {
+		return new DataSource<X>(this, new ParallelIteratorInputFormat<X>(iterator), type, callLocationName);
 	}
 	
 	/**
@@ -544,7 +596,7 @@ public abstract class ExecutionEnvironment {
 	 * @return A DataSet, containing all number in the {@code [from, to]} interval.
 	 */
 	public DataSource<Long> generateSequence(long from, long to) {
-		return fromParallelCollection(new NumberSequenceIterator(from, to), BasicTypeInfo.LONG_TYPE_INFO);
+		return fromParallelCollection(new NumberSequenceIterator(from, to), BasicTypeInfo.LONG_TYPE_INFO, Utils.getCallLocationName());
 	}	
 	
 	// --------------------------------------------------------------------------------------------
@@ -584,6 +636,7 @@ public abstract class ExecutionEnvironment {
 	/**
 	 * Creates the plan with which the system will execute the program, and returns it as 
 	 * a String using a JSON representation of the execution data flow graph.
+	 * Note that this needs to be called, before the plan is executed.
 	 * 
 	 * @return The execution plan of the program, as a JSON String.
 	 * @throws Exception Thrown, if the compiler could not be instantiated, or the master could not
@@ -647,6 +700,7 @@ public abstract class ExecutionEnvironment {
 	 * {@link org.apache.flink.api.common.PlanExecutor}. Obtaining a plan and starting it with an
 	 * executor is an alternative way to run a program and is only possible if the program consists
 	 * only of distributed operations.
+	 * This automatically starts a new stage of execution.
 	 * 
 	 * @return The program's plan.
 	 */
@@ -660,11 +714,27 @@ public abstract class ExecutionEnvironment {
 	 * {@link org.apache.flink.api.common.PlanExecutor}. Obtaining a plan and starting it with an
 	 * executor is an alternative way to run a program and is only possible if the program consists
 	 * only of distributed operations.
+	 * This automatically starts a new stage of execution.
 	 * 
 	 * @param jobName The name attached to the plan (displayed in logs and monitoring).
 	 * @return The program's plan.
 	 */
 	public JavaPlan createProgramPlan(String jobName) {
+		return createProgramPlan(jobName, true);
+	}
+
+	/**
+	 * Creates the program's {@link Plan}. The plan is a description of all data sources, data sinks,
+	 * and operations and how they interact, as an isolated unit that can be executed with a
+	 * {@link org.apache.flink.api.common.PlanExecutor}. Obtaining a plan and starting it with an
+	 * executor is an alternative way to run a program and is only possible if the program consists
+	 * only of distributed operations.
+	 *
+	 * @param jobName The name attached to the plan (displayed in logs and monitoring).
+	 * @param clearSinks Whether or not to start a new stage of execution.
+	 * @return The program's plan.
+	 */
+	public JavaPlan createProgramPlan(String jobName, boolean clearSinks) {
 		if (this.sinks.isEmpty()) {
 			throw new RuntimeException("No data sinks have been created yet. A program needs at least one sink that consumes data. Examples are writing the data set or printing it.");
 		}
@@ -679,8 +749,7 @@ public abstract class ExecutionEnvironment {
 		if (getDegreeOfParallelism() > 0) {
 			plan.setDefaultParallelism(getDegreeOfParallelism());
 		}
-		plan.setNumberOfExecutionRetries(this.numberOfExecutionRetries);
-		
+
 		try {
 			registerCachedFilesWithPlan(plan);
 		} catch (Exception e) {
@@ -688,7 +757,9 @@ public abstract class ExecutionEnvironment {
 		}
 		
 		// clear all the sinks such that the next execution does not redo everything
-		this.sinks.clear();
+		if (clearSinks) {
+			this.sinks.clear();
+		}
 		
 		return plan;
 	}
@@ -725,7 +796,8 @@ public abstract class ExecutionEnvironment {
 	 * @return The execution environment of the context in which the program is executed.
 	 */
 	public static ExecutionEnvironment getExecutionEnvironment() {
-		return contextEnvironment == null ? createLocalEnvironment() : contextEnvironment;
+		return contextEnvironmentFactory == null ? 
+				createLocalEnvironment() : contextEnvironmentFactory.createExecutionEnvironment();
 	}
 	
 	/**
@@ -804,20 +876,19 @@ public abstract class ExecutionEnvironment {
 	//  Methods to control the context and local environments for execution from packaged programs
 	// --------------------------------------------------------------------------------------------
 	
-	protected static void initializeContextEnvironment(ExecutionEnvironment ctx) {
-		contextEnvironment = ctx;
+	protected static void initializeContextEnvironment(ExecutionEnvironmentFactory ctx) {
+		contextEnvironmentFactory = ctx;
 	}
 	
 	protected static boolean isContextEnvironmentSet() {
-		return contextEnvironment != null;
+		return contextEnvironmentFactory != null;
 	}
 	
-	protected static void disableLocalExecution() {
-		allowLocalExecution = false;
+	protected static void enableLocalExecution(boolean enabled) {
+		allowLocalExecution = enabled;
 	}
 	
 	public static boolean localExecutionIsAllowed() {
 		return allowLocalExecution;
 	}
-
 }

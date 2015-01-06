@@ -16,13 +16,12 @@
  * limitations under the License.
  */
 
-
 package org.apache.flink.runtime.io.network;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import akka.actor.ActorRef;
 import org.apache.flink.core.io.IOReadableWritable;
 import org.apache.flink.runtime.AbstractID;
+import org.apache.flink.runtime.akka.AkkaUtils;
 import org.apache.flink.runtime.execution.CancelTaskException;
 import org.apache.flink.runtime.execution.Environment;
 import org.apache.flink.runtime.execution.RuntimeEnvironment;
@@ -42,9 +41,12 @@ import org.apache.flink.runtime.io.network.gates.GateID;
 import org.apache.flink.runtime.io.network.gates.InputGate;
 import org.apache.flink.runtime.io.network.gates.OutputGate;
 import org.apache.flink.runtime.jobgraph.JobID;
-import org.apache.flink.runtime.protocols.ChannelLookupProtocol;
+import org.apache.flink.runtime.messages.JobManagerMessages;
 import org.apache.flink.runtime.taskmanager.Task;
 import org.apache.flink.util.ExceptionUtils;
+import scala.concurrent.duration.FiniteDuration;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -59,7 +61,7 @@ public class ChannelManager implements EnvelopeDispatcher, BufferProviderBroker 
 
 	private static final Logger LOG = LoggerFactory.getLogger(ChannelManager.class);
 
-	private final ChannelLookupProtocol channelLookupService;
+	private final ActorRef channelLookup;
 
 	private final InstanceConnectionInfo connectionInfo;
 
@@ -77,13 +79,18 @@ public class ChannelManager implements EnvelopeDispatcher, BufferProviderBroker 
 	
 	private final DiscardBufferPool discardBufferPool;
 
+	private final FiniteDuration timeout;
+
 	// -----------------------------------------------------------------------------------------------------------------
 
-	public ChannelManager(ChannelLookupProtocol channelLookupService, InstanceConnectionInfo connectionInfo,
-			int numNetworkBuffers, int networkBufferSize, NetworkConnectionManager networkConnectionManager) throws IOException {
+	public ChannelManager(ActorRef channelLookup, InstanceConnectionInfo connectionInfo, int numNetworkBuffers,
+						int networkBufferSize, NetworkConnectionManager networkConnectionManager,
+						FiniteDuration timeout) throws IOException {
 
-		this.channelLookupService = channelLookupService;
+		this.channelLookup= channelLookup;
 		this.connectionInfo = connectionInfo;
+
+		this.timeout = timeout;
 
 		try {
 			this.globalBufferPool = new GlobalBufferPool(numNetworkBuffers, networkBufferSize);
@@ -113,6 +120,10 @@ public class ChannelManager implements EnvelopeDispatcher, BufferProviderBroker 
 
 	public GlobalBufferPool getGlobalBufferPool() {
 		return globalBufferPool;
+	}
+
+	public NetworkConnectionManager getNetworkConnectionManager() {
+		return networkConnectionManager;
 	}
 	
 	// -----------------------------------------------------------------------------------------------------------------
@@ -205,8 +216,10 @@ public class ChannelManager implements EnvelopeDispatcher, BufferProviderBroker 
 		for (ChannelID id : environment.getOutputChannelIDs()) {
 			Channel channel = this.channels.remove(id);
 			if (channel != null) {
+
 				channel.destroy();
-				this.receiverCache.remove(channel);
+
+				removeFromReceiverCacheAndMaybeCloseTcpConnection(channel);
 			}
 		}
 
@@ -215,7 +228,8 @@ public class ChannelManager implements EnvelopeDispatcher, BufferProviderBroker 
 			Channel channel = this.channels.remove(id);
 			if (channel != null) {
 				channel.destroy();
-				this.receiverCache.remove(channel);
+
+				removeFromReceiverCacheAndMaybeCloseTcpConnection(channel);
 			}
 		}
 
@@ -236,6 +250,14 @@ public class ChannelManager implements EnvelopeDispatcher, BufferProviderBroker 
 		// the number of channels per buffers has changed after unregistering the task
 		// => redistribute the number of designated buffers of the registered local buffer pools
 		redistributeBuffers();
+	}
+
+	private void removeFromReceiverCacheAndMaybeCloseTcpConnection(Channel channel) {
+		EnvelopeReceiverList receiver = this.receiverCache.remove(channel.getID());
+
+		if (receiver != null && receiver.hasRemoteReceiver()) {
+			networkConnectionManager.close(receiver.getRemoteReceiver());
+		}
 	}
 
 	/**
@@ -336,7 +358,7 @@ public class ChannelManager implements EnvelopeDispatcher, BufferProviderBroker 
 		final RemoteReceiver ourAddress = new RemoteReceiver(this.ourAddress, connectionIndex);
 		final Envelope senderHint = SenderHintEvent.createEnvelopeWithEvent(envelope, targetChannelID, ourAddress);
 
-		this.networkConnectionManager.enqueue(senderHint, receiver);
+		this.networkConnectionManager.enqueue(senderHint, receiver, true);
 	}
 
 	/**
@@ -358,9 +380,9 @@ public class ChannelManager implements EnvelopeDispatcher, BufferProviderBroker 
 
 		while (true) {
 			ConnectionInfoLookupResponse lookupResponse;
-			synchronized (this.channelLookupService) {
-				lookupResponse = this.channelLookupService.lookupConnectionInfo(this.connectionInfo, jobID, sourceChannelID);
-			}
+			lookupResponse = AkkaUtils.<JobManagerMessages.ConnectionInformation>ask(channelLookup,
+					new JobManagerMessages.LookupConnectionInformation(connectionInfo, jobID,
+							sourceChannelID), timeout).response();
 
 			if (lookupResponse.receiverReady()) {
 				receiverList = new EnvelopeReceiverList(lookupResponse);
@@ -396,9 +418,7 @@ public class ChannelManager implements EnvelopeDispatcher, BufferProviderBroker 
 			}
 		}
 
-		if (channels.containsKey(sourceChannelID)) {
-			this.receiverCache.put(sourceChannelID, receiverList);
-		}
+		this.receiverCache.put(sourceChannelID, receiverList);
 
 		if (LOG.isDebugEnabled()) {
 			LOG.debug(String.format("Receiver for %s: %s [%s])",
@@ -473,7 +493,7 @@ public class ChannelManager implements EnvelopeDispatcher, BufferProviderBroker 
 					generateSenderHint(envelope, remoteReceiver);
 				}
 
-				this.networkConnectionManager.enqueue(envelope, remoteReceiver);
+				this.networkConnectionManager.enqueue(envelope, remoteReceiver, false);
 				success = true;
 			}
 		} finally {
@@ -517,11 +537,7 @@ public class ChannelManager implements EnvelopeDispatcher, BufferProviderBroker 
 			RemoteReceiver remoteReceiver = receiverList.getRemoteReceiver();
 
 			// Generate sender hint before sending the first envelope over the network
-			if (envelope.getSequenceNumber() == 0) {
-				generateSenderHint(envelope, remoteReceiver);
-			}
-
-			this.networkConnectionManager.enqueue(envelope, remoteReceiver);
+			this.networkConnectionManager.enqueue(envelope, remoteReceiver, envelope.getSequenceNumber() == 0);
 		}
 	}
 

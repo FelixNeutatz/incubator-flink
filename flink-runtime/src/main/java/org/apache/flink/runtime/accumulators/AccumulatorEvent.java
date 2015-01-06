@@ -20,19 +20,15 @@ package org.apache.flink.runtime.accumulators;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.Serializable;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
 import org.apache.flink.api.common.accumulators.Accumulator;
-import org.apache.flink.core.io.IOReadableWritable;
-import org.apache.flink.core.memory.DataInputView;
-import org.apache.flink.core.memory.DataOutputView;
-import org.apache.flink.core.memory.InputViewDataInputStreamWrapper;
-import org.apache.flink.core.memory.OutputViewDataOutputStreamWrapper;
 import org.apache.flink.runtime.jobgraph.JobID;
 import org.apache.flink.util.InstantiationUtil;
 
@@ -41,16 +37,16 @@ import org.apache.flink.util.InstantiationUtil;
  * for the transfer from TaskManagers to the JobManager and from the JobManager
  * to the Client.
  */
-public class AccumulatorEvent implements IOReadableWritable {
+public class AccumulatorEvent implements Serializable {
+
+	private static final long serialVersionUID = 8965894516006882735L;
 
 	private JobID jobID;
 	
 	private Map<String, Accumulator<?, ?>> accumulators;
 	
 	// staging deserialized data until the classloader is available
-	private String[] accNames;
-	private String[] classNames;
-	private byte[][] serializedData;
+	private byte[] serializedData;
 
 
 	// Removing this causes an EOFException in the RPC service. The RPC should
@@ -76,91 +72,125 @@ public class AccumulatorEvent implements IOReadableWritable {
 		if (this.accumulators == null) {
 			// deserialize
 			// we have read the binary data, but not yet turned into the objects
-			final int num = accNames.length;
-			this.accumulators = new HashMap<String, Accumulator<?,?>>(num);
-			for (int i = 0; i < num; i++) {
-				Accumulator<?, ?> acc;
+			ByteArrayInputStream bais = new ByteArrayInputStream(serializedData);
+			ObjectInputStream ios = null;
+			try {
+				ios = new ObjectInputStream(bais);
+			} catch (IOException e) {
+				throw new RuntimeException("Error while creating the object input stream.");
+			}
+
+			int numAccumulators = 0;
+			try {
+				numAccumulators = ios.readInt();
+			} catch (IOException e) {
+				throw new RuntimeException("Error while reading the number of serialized " +
+						"accumulators.");
+			}
+
+			this.accumulators = new HashMap<String, Accumulator<?, ?>>(numAccumulators);
+
+			for (int i = 0; i < numAccumulators; i++) {
+				String accumulatorName;
+				try {
+					accumulatorName = ios.readUTF();
+				} catch (IOException e) {
+					throw new RuntimeException("Error while reading the "+ i +"th accumulator " +
+							"name.");
+				}
+
+				String className;
+				try {
+					className = ios.readUTF();
+				} catch (IOException e) {
+					throw new RuntimeException("Error while reading the "+ i +"th accumulator " +
+							"class name.");
+				}
+				Accumulator<?, ?> accumulator;
+
 				try {
 					@SuppressWarnings("unchecked")
-					Class<? extends Accumulator<?, ?>> valClass = (Class<? extends Accumulator<?, ?>>) Class.forName(classNames[i], true, loader);
-					acc = InstantiationUtil.instantiate(valClass, Accumulator.class);
-				}
-				catch (ClassNotFoundException e) {
-					throw new RuntimeException("Could not load user-defined class '" + classNames[i] + "'.", e);
-				}
-				catch (ClassCastException e) {
+					Class<? extends Accumulator<?, ?>> valClass = (Class<? extends Accumulator<?,
+							?>>) Class.forName(className, true, loader);
+					accumulator = InstantiationUtil.instantiate(valClass, Accumulator.class);
+				} catch (ClassNotFoundException e) {
+					throw new RuntimeException("Could not load user-defined class '" +
+							className + "'.", e);
+				} catch (ClassCastException e) {
 					throw new RuntimeException("User-defined accumulator class is not an Accumulator sublass.");
 				}
-				
-				DataInputStream in = new DataInputStream(new ByteArrayInputStream(serializedData[i]));
+
 				try {
-					acc.read(new InputViewDataInputStreamWrapper(in));
-					in.close();
+					accumulator.read(ios);
 				} catch (IOException e) {
 					throw new RuntimeException("Error while deserializing the user-defined aggregate class.", e);
 				}
-				
-				accumulators.put(accNames[i], acc);
+
+				accumulators.put(accumulatorName, accumulator);
+
 			}
-			
-			// reset the serialized data
-			this.accNames = null;
-			this.classNames = null;
-			this.serializedData = null;
+
+			try {
+				ios.close();
+			} catch (IOException e) {
+				throw new RuntimeException("Error while closing the InputObjectStream.");
+			}
+
+			try {
+				bais.close();
+			} catch (IOException e) {
+				throw new RuntimeException("Error while closing the ByteArrayInputStream.");
+			}
+
 		}
-		
-		return this.accumulators;
+
+		return accumulators;
 	}
 
-	@Override
-	public void write(DataOutputView out) throws IOException {
-		jobID.write(out);
-		out.writeInt(accumulators.size());
-		
-		if (accumulators.size() > 0) {
-			ByteArrayOutputStream boas = new ByteArrayOutputStream();
-			DataOutputStream bufferStream = new DataOutputStream(boas);
-			
+	private void writeObject(java.io.ObjectOutputStream out) throws IOException{
+		out.writeObject(jobID);
+
+		byte[] buffer = null;
+
+		if(accumulators != null) {
+			ByteArrayOutputStream baos = new ByteArrayOutputStream();
+			ObjectOutputStream oos = new ObjectOutputStream(baos);
+
+			oos.writeInt(accumulators.size());
+
 			for (Map.Entry<String, Accumulator<?, ?>> entry : this.accumulators.entrySet()) {
-				
-				// write accumulator name
-				out.writeUTF(entry.getKey());
-				
-				// write type class
-				out.writeUTF(entry.getValue().getClass().getName());
-				
-				entry.getValue().write(new OutputViewDataOutputStreamWrapper(bufferStream));
-				bufferStream.flush();
-				byte[] bytes = boas.toByteArray();
-				out.writeInt(bytes.length);
-				out.write(bytes);
-				boas.reset();
+				oos.writeUTF(entry.getKey());
+				oos.writeUTF(entry.getValue().getClass().getName());
+
+				entry.getValue().write(oos);
 			}
-			bufferStream.close();
-			boas.close();
+
+			oos.flush();
+			oos.close();
+			baos.close();
+
+			buffer = baos.toByteArray();
+		}else if(serializedData != null){
+			buffer = serializedData;
+		}else{
+			throw new RuntimeException("The AccumulatorEvent's accumulator is null and there is " +
+					"no serialized data attached to it.");
 		}
+
+		out.writeInt(buffer.length);
+		out.write(buffer);
 	}
 
-	@Override
-	public void read(DataInputView in) throws IOException {
+	private void readObject(java.io.ObjectInputStream in) throws IOException,
+			ClassNotFoundException{
 		this.accumulators = null; // this makes sure we deserialize
-		
-		jobID = new JobID();
-		jobID.read(in);
-		
-		int numberOfMapEntries = in.readInt();
-		this.accNames = new String[numberOfMapEntries];
-		this.classNames = new String[numberOfMapEntries];
-		this.serializedData = new byte[numberOfMapEntries][];
 
-		for (int i = 0; i < numberOfMapEntries; i++) {
-			this.accNames[i] = in.readUTF();
-			this.classNames[i] = in.readUTF();
-			
-			int len = in.readInt();
-			byte[] data = new byte[len];
-			this.serializedData[i] = data;
-			in.readFully(data);
-		}
+		jobID = (JobID) in.readObject();
+
+		int bufferLength = in.readInt();
+
+		serializedData = new byte[bufferLength];
+
+		in.readFully(serializedData);
 	}
 }

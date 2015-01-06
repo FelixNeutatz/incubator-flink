@@ -19,15 +19,14 @@
 package org.apache.flink.runtime.instance;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.Timer;
-import java.util.TimerTask;
 
+import akka.actor.ActorRef;
 import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.GlobalConfiguration;
 import org.slf4j.Logger;
@@ -51,10 +50,10 @@ public class InstanceManager {
 	private final Map<InstanceID, Instance> registeredHostsById;
 
 	/** Set of hosts known to run a task manager that are thus able to execute tasks (by connection). */
-	private final Map<InstanceConnectionInfo, Instance> registeredHostsByConnection;
+	private final Map<ActorRef, Instance> registeredHostsByConnection;
 	
 	/** Set of hosts that were present once and have died */
-	private final Set<InstanceConnectionInfo> deadHosts;
+	private final Set<ActorRef> deadHosts;
 	
 	/** Listeners that want to be notified about availability and disappearance of instances */
 	private final List<InstanceListener> instanceListeners = new ArrayList<InstanceListener>();
@@ -92,11 +91,9 @@ public class InstanceManager {
 		}
 		
 		this.registeredHostsById = new HashMap<InstanceID, Instance>();
-		this.registeredHostsByConnection = new HashMap<InstanceConnectionInfo, Instance>();
-		this.deadHosts = new HashSet<InstanceConnectionInfo>();
+		this.registeredHostsByConnection = new HashMap<ActorRef, Instance>();
+		this.deadHosts = new HashSet<ActorRef>();
 		this.heartbeatTimeout = heartbeatTimeout;
-
-		new Timer(true).schedule(cleanupStaleMachines, cleanupInterval, cleanupInterval);
 	}
 	
 	public long getHeartbeatTimeout() {
@@ -109,8 +106,6 @@ public class InstanceManager {
 				return;
 			}
 			this.shutdown = true;
-
-			this.cleanupStaleMachines.cancel();
 
 			for (Instance i : this.registeredHostsById.values()) {
 				i.markDead();
@@ -149,22 +144,23 @@ public class InstanceManager {
 		}
 	}
 
-	public InstanceID registerTaskManager(InstanceConnectionInfo instanceConnectionInfo, HardwareDescription resources, int numberOfSlots){
+	public InstanceID registerTaskManager(ActorRef taskManager, InstanceConnectionInfo connectionInfo,
+										HardwareDescription resources, int numberOfSlots){
 		synchronized(this.lock){
 			if (this.shutdown) {
 				throw new IllegalStateException("InstanceManager is shut down.");
 			}
 			
-			Instance prior = registeredHostsByConnection.get(instanceConnectionInfo);
+			Instance prior = registeredHostsByConnection.get(taskManager);
 			if (prior != null) {
-				LOG.error("Registration attempt from TaskManager with connection info " + instanceConnectionInfo + 
+				LOG.error("Registration attempt from TaskManager at " + taskManager.path() +
 						". This connection is already registered under ID " + prior.getId());
 				return null;
 			}
 			
-			boolean wasDead = this.deadHosts.remove(instanceConnectionInfo);
+			boolean wasDead = this.deadHosts.remove(taskManager);
 			if (wasDead) {
-				LOG.info("Registering TaskManager with connection info " + instanceConnectionInfo + 
+				LOG.info("Registering TaskManager at " + taskManager.path() +
 						" which was marked as dead earlier because of a heart-beat timeout.");
 			}
 
@@ -174,16 +170,16 @@ public class InstanceManager {
 			} while (registeredHostsById.containsKey(id));
 			
 			
-			Instance host = new Instance(instanceConnectionInfo, id, resources, numberOfSlots);
+			Instance host = new Instance(taskManager, connectionInfo, id, resources, numberOfSlots);
 			
 			registeredHostsById.put(id, host);
-			registeredHostsByConnection.put(instanceConnectionInfo, host);
+			registeredHostsByConnection.put(taskManager, host);
 			
 			totalNumberOfAliveTaskSlots += numberOfSlots;
 			
 			if (LOG.isInfoEnabled()) {
 				LOG.info(String.format("Registered TaskManager at %s as %s. Current number of registered hosts is %d.",
-						instanceConnectionInfo, id, registeredHostsById.size()));
+						taskManager.path(), id, registeredHostsById.size()));
 			}
 
 			host.reportHeartBeat();
@@ -195,6 +191,26 @@ public class InstanceManager {
 		}
 	}
 
+	public void unregisterTaskManager(ActorRef taskManager){
+		Instance host = registeredHostsByConnection.get(taskManager);
+
+		if(host != null){
+			registeredHostsByConnection.remove(taskManager);
+			registeredHostsById.remove(host.getId());
+			deadHosts.add(taskManager);
+
+			host.markDead();
+
+			totalNumberOfAliveTaskSlots -= host.getTotalNumberOfSlots();
+
+			notifyDeadInstance(host);
+
+			LOG.info("Unregistered task manager " + taskManager.path().address() + ". Number of " +
+					"registered task managers " + getNumberOfRegisteredTaskManagers() + ". Number" +
+					" of available slots " + getTotalNumberOfSlots() + ".");
+		}
+	}
+
 	public int getNumberOfRegisteredTaskManagers() {
 		return this.registeredHostsById.size();
 	}
@@ -203,11 +219,11 @@ public class InstanceManager {
 		return this.totalNumberOfAliveTaskSlots;
 	}
 	
-	public Map<InstanceID, Instance> getAllRegisteredInstances() {
+	public Collection<Instance> getAllRegisteredInstances() {
 		synchronized (this.lock) {
 			// return a copy (rather than a Collections.unmodifiable(...) wrapper), such that
 			// concurrent modifications do not interfere with the traversals or lookups
-			return new HashMap<InstanceID, Instance>(this.registeredHostsById);
+			return new HashSet<Instance>(registeredHostsById.values());
 		}
 	}
 	
@@ -243,70 +259,10 @@ public class InstanceManager {
 			for (InstanceListener listener : this.instanceListeners) {
 				try {
 					listener.instanceDied(instance);
-				}
-				catch (Throwable t) {
+				} catch (Throwable t) {
 					LOG.error("Notification of dead instance failed.", t);
 				}
 			}
 		}
 	}
-	
-	// --------------------------------------------------------------------------------------------
-	
-	private void checkForDeadInstances() {
-		final long now = System.currentTimeMillis();
-		final long timeout = InstanceManager.this.heartbeatTimeout;
-		
-		synchronized (InstanceManager.this.lock) {
-			if (InstanceManager.this.shutdown) {
-				return;
-			}
-
-			final Iterator<Map.Entry<InstanceID, Instance>> entries = registeredHostsById.entrySet().iterator();
-			
-			// check all hosts whether they did not send heart-beat messages.
-			while (entries.hasNext()) {
-				
-				final Map.Entry<InstanceID, Instance> entry = entries.next();
-				final Instance host = entry.getValue();
-				
-				if (!host.isStillAlive(now, timeout)) {
-					
-					// remove from the living
-					entries.remove();
-					registeredHostsByConnection.remove(host.getInstanceConnectionInfo());
-					
-					// add to the dead
-					deadHosts.add(host.getInstanceConnectionInfo());
-					
-					host.markDead();
-					
-					totalNumberOfAliveTaskSlots -= host.getTotalNumberOfSlots();
-					
-					LOG.info(String.format("TaskManager %s at %s did not report a heartbeat for %d msecs - marking as dead. Current number of registered hosts is %d.",
-							host.getId(), host.getInstanceConnectionInfo(), heartbeatTimeout, registeredHostsById.size()));
-					
-					// report to all listeners
-					notifyDeadInstance(host);
-				}
-			}
-		}
-	}
-	// --------------------------------------------------------------------------------------------
-	
-	/**
-	 * Periodic task that checks whether hosts have not sent their heart-beat
-	 * messages and purges the hosts in this case.
-	 */
-	private final TimerTask cleanupStaleMachines = new TimerTask() {
-		@Override
-		public void run() {
-			try {
-				checkForDeadInstances();
-			}
-			catch (Throwable t) {
-				LOG.error("Checking for dead instances failed.", t);
-			}
-		}
-	};
 }

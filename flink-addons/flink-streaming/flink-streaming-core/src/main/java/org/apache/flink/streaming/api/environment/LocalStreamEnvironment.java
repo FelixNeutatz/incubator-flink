@@ -21,13 +21,15 @@ import org.apache.flink.streaming.util.ClusterUtil;
 
 public class LocalStreamEnvironment extends StreamExecutionEnvironment {
 
+	protected static ClassLoader userClassLoader;
+
 	/**
 	 * Executes the JobGraph of the on a mini cluster of CLusterUtil with a
 	 * default name.
 	 */
 	@Override
 	public void execute() throws Exception {
-		ClusterUtil.runOnMiniCluster(this.jobGraphBuilder.getJobGraph(), getExecutionParallelism());
+		ClusterUtil.runOnMiniCluster(this.jobGraphBuilder.getJobGraph(), getDegreeOfParallelism());
 	}
 
 	/**
@@ -40,12 +42,6 @@ public class LocalStreamEnvironment extends StreamExecutionEnvironment {
 	@Override
 	public void execute(String jobName) throws Exception {
 		ClusterUtil.runOnMiniCluster(this.jobGraphBuilder.getJobGraph(jobName),
-				getExecutionParallelism());
+				getDegreeOfParallelism());
 	}
-
-	public void executeTest(long memorySize) throws Exception {
-		ClusterUtil.runOnMiniCluster(this.jobGraphBuilder.getJobGraph(), getExecutionParallelism(),
-				memorySize);
-	}
-
 }
