@@ -23,6 +23,7 @@ import org.apache.flink.api.common.io.DefaultInputSplitAssigner;
 import org.apache.flink.api.common.io.FileInputFormat.FileBaseStatistics;
 import org.apache.flink.api.common.io.InputFormat;
 import org.apache.flink.api.common.io.statistics.BaseStatistics;
+import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
@@ -50,14 +51,14 @@ import java.util.List;
 
 import org.apache.flink.api.java.typeutils.TypeExtractor;
 
-public class FlinkParquetInputFormat<K extends Writable, V extends Writable> implements InputFormat<Tuple2<K,V>, HadoopInputSplit>, ResultTypeQueryable<Tuple2<K,V>> {
+public class FlinkParquetInputFormat<K extends Object,V extends Writable> implements InputFormat<Tuple2<K,V>, HadoopInputSplit>, ResultTypeQueryable<Tuple2<K,V>> {
 
 	private static final long serialVersionUID = 1L;
 
 	private static final Logger LOG = LoggerFactory.getLogger(FlinkParquetInputFormat.class);
 
 	private org.apache.hadoop.mapreduce.InputFormat<K, V> mapreduceInputFormat;
-	private Class<K> keyClass;
+	private Class keyClass;
 	private Class<V> valueClass;
 	private org.apache.hadoop.conf.Configuration configuration;
 
@@ -72,7 +73,7 @@ public class FlinkParquetInputFormat<K extends Writable, V extends Writable> imp
 	public FlinkParquetInputFormat(org.apache.hadoop.mapreduce.InputFormat<K, V> mapreduceInputFormat, Class<V> value, Job job) {
 		super();
 		this.mapreduceInputFormat = mapreduceInputFormat;
-		this.keyClass = (Class<K>)LongWritable.class;
+		this.keyClass = Void.class;
 		this.valueClass = value;
 		this.configuration = job.getConfiguration();
 		HadoopUtils.mergeHadoopConf(configuration);
@@ -218,7 +219,7 @@ public class FlinkParquetInputFormat<K extends Writable, V extends Writable> imp
 			return null;
 		}
 		try {
-			record.f0 = (K)new LongWritable(1L);
+			record.f0 = null;
 			record.f1 = this.recordReader.getCurrentValue();
 		} catch (InterruptedException e) {
 			throw new IOException("Could not get KeyValue pair.", e);
@@ -333,6 +334,6 @@ public class FlinkParquetInputFormat<K extends Writable, V extends Writable> imp
 	
 	@Override
 	public TypeInformation<Tuple2<K,V>> getProducedType() {
-		return new TupleTypeInfo<Tuple2<K,V>>(new WritableTypeInfo<K>((Class<K>) keyClass), TypeExtractor.getForClass(valueClass));
+		return new TupleTypeInfo<Tuple2<K,V>>(BasicTypeInfo.VOID_TYPE_INFO, TypeExtractor.getForClass(valueClass));
 	}
 }

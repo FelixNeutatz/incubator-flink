@@ -55,6 +55,8 @@ public class ParquetInput {
 
 
         FlinkParquetInputFormat hadoopInputFormat = new FlinkParquetInputFormat(new ParquetThriftInputFormat(), AminoAcid.class, job);
+        //HadoopInputFormat hadoopInputFormat = new HadoopInputFormat(new ParquetThriftInputFormat(), Void.class, AminoAcid.class, job);
+
         ParquetThriftInputFormat.addInputPath(job, new Path("newpath"));
         ParquetThriftInputFormat.setReadSupportClass(job, AminoAcid.class);
 
