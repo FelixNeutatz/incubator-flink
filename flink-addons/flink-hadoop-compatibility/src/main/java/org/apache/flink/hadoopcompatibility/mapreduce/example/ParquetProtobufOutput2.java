@@ -18,7 +18,6 @@
 
 package org.apache.flink.hadoopcompatibility.mapreduce.example;
 
-import com.twitter.data.proto.tutorial.AddressBookProtos;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.DataSet;
 import org.apache.flink.api.java.ExecutionEnvironment;
