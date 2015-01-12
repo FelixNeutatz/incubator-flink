@@ -45,7 +45,7 @@ import org.apache.flink.api.common.typeinfo.TypeInformation;
  * common Java types for better usage in a Flink job and how to use Hadoop Output Formats.
  */
 @SuppressWarnings("serial")
-public class ParquetOutput {
+public class ParquetThriftOutput {
 
     public static void main(String[] args) throws Exception {
 

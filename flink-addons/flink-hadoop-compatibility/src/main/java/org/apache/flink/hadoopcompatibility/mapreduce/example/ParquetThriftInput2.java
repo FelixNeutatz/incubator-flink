@@ -22,7 +22,7 @@ import org.apache.flink.api.java.DataSet;
 import org.apache.flink.api.java.ExecutionEnvironment;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.hadoopcompatibility.mapreduce.HadoopInputFormat;
-import org.apache.flink.hadoopcompatibility.mapreduce.example.thrift.AminoAcid;
+import org.apache.flink.hadoopcompatibility.mapreduce.example.thrift.ParsedPage;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.mapreduce.Job;
@@ -36,7 +36,7 @@ import parquet.hadoop.thrift.ParquetThriftInputFormat;
  * common Java types for better usage in a Flink job and how to use Hadoop Output Formats.
  */
 @SuppressWarnings("serial")
-public class ParquetInput {
+public class ParquetThriftInput2 {
 
     public static void main(String[] args) throws Exception {
 
@@ -45,13 +45,13 @@ public class ParquetInput {
 
         Job job = Job.getInstance();
 
-        HadoopInputFormat hadoopInputFormat = new HadoopInputFormat(new ParquetThriftInputFormat(), Void.class, AminoAcid.class, job);
+        HadoopInputFormat hadoopInputFormat = new HadoopInputFormat(new ParquetThriftInputFormat(), Void.class, ParsedPage.class, job);
 
         ParquetThriftInputFormat.addInputPath(job, new Path("newpath"));
-        ParquetThriftInputFormat.setReadSupportClass(job, AminoAcid.class);
+        ParquetThriftInputFormat.setReadSupportClass(job, ParsedPage.class);
 
 
-        DataSet<Tuple2<LongWritable, AminoAcid>> data = env.createInput(hadoopInputFormat);
+        DataSet<Tuple2<LongWritable, ParsedPage>> data = env.createInput(hadoopInputFormat);
 
         data.print();
 
