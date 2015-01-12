@@ -19,14 +19,12 @@
 package org.apache.flink.streaming.api.scala
 
 import scala.reflect.ClassTag
-
 import org.apache.commons.lang.Validate
 import org.apache.flink.api.common.typeinfo.TypeInformation
-import org.apache.flink.api.scala._
 import org.apache.flink.streaming.api.environment.{StreamExecutionEnvironment => JavaEnv}
 import org.apache.flink.streaming.api.function.source.{ FromElementsFunction, SourceFunction }
-import org.apache.flink.streaming.api.scala.StreamingConversions.javaToScalaStream
 import org.apache.flink.util.Collector
+import org.apache.flink.api.scala.ClosureCleaner
 
 class StreamExecutionEnvironment(javaEnv: JavaEnv) {
 
@@ -151,7 +149,11 @@ class StreamExecutionEnvironment(javaEnv: JavaEnv) {
 
   /**
    * Create a DataStream using a user defined source function for arbitrary
-   * source functionality.
+   * source functionality. By default sources have a parallelism of 1. 
+   * To enable parallel execution, the user defined source should implement 
+   * ParallelSourceFunction or extend RichParallelSourceFunction. 
+   * In these cases the resulting source will have the parallelism of the environment. 
+   * To change this afterwards call DataStreamSource.setParallelism(int)
    *
    */
   def addSource[T: ClassTag: TypeInformation](function: SourceFunction[T]): DataStream[T] = {

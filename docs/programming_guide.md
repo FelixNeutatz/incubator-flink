@@ -494,7 +494,11 @@ data.mapPartition(new MapPartitionFunction<String, Long>() {
       <td><strong>Filter</strong></td>
       <td>
         <p>Evaluates a boolean function for each element and retains those for which the function
-        returns true.</p>
+        returns true.<br/>
+        
+        <strong>IMPORTANT:</strong> The system assumes that the function does not modify the elements on which the predicate is applied. Violating this assumption
+        can lead to incorrect results.
+        </p>
 {% highlight java %}
 data.filter(new FilterFunction<Integer>() {
   public boolean filter(Integer value) { return value > 1000; }
@@ -565,6 +569,20 @@ result = input1.join(input2)
                .where(0)       // key of the first input (tuple field 0)
                .equalTo(1);    // key of the second input (tuple field 1)
 {% endhighlight %}
+        You can specify the way that the runtime executes the join via <i>Join Hints</i>. The hints
+        describe whether the join happens through partitioning or broadcasting, and whether it uses
+        a sort-based or a hash-based algorithm. Please refer to the 
+        <a href="dataset_transformations.html#join-algorithm-hints">Transformations Guide</a> for
+        a list of possible hints and an example.</br>
+        If no hint is specified, the system will try to make an estimate of the input sizes and
+        pick a the best strategy according to those estimates. 
+{% highlight java %}
+// This executes a join by broadcasting the first data set
+// using a hash table for the broadcasted data
+result = input1.join(input2, JoinHint.BROADCAST_HASH_FIRST)
+               .where(0).equalTo(1);
+{% endhighlight %}
+
       </td>
     </tr>
 
@@ -729,7 +747,9 @@ data.mapPartition { in => in map { (_, 1) } }
       <td><strong>Filter</strong></td>
       <td>
         <p>Evaluates a boolean function for each element and retains those for which the function
-        returns true.</p>
+        returns true.<br/>
+        <strong>IMPORTANT:</strong> The system assumes that the function does not modify the element on which the predicate is applied.
+        Violating this assumption can lead to incorrect results.</p>
 {% highlight scala %}
 data.filter { _ > 1000 }
 {% endhighlight %}
@@ -783,10 +803,23 @@ val output: DataSet[(Int, String, Doublr)] = input.sum(0).min(2)
         Optionally uses a JoinFunction to turn the pair of elements into a single element, or a
         FlatJoinFunction to turn the pair of elements into arbitararily many (including none)
         elements. See <a href="#specifying-keys">keys</a> on how to define join keys.
-{% highlight java %}
+{% highlight scala %}
 // In this case tuple fields are used as keys. "0" is the join field on the first tuple
 // "1" is the join field on the second tuple.
 val result = input1.join(input2).where(0).equalTo(1)
+{% endhighlight %}
+        You can specify the way that the runtime executes the join via <i>Join Hints</i>. The hints
+        describe whether the join happens through partitioning or broadcasting, and whether it uses
+        a sort-based or a hash-based algorithm. Please refer to the 
+        <a href="dataset_transformations.html#join-algorithm-hints">Transformations Guide</a> for
+        a list of possible hints and an example.</br>
+        If no hint is specified, the system will try to make an estimate of the input sizes and
+        pick a the best strategy according to those estimates.
+{% highlight scala %}
+// This executes a join by broadcasting the first data set
+// using a hash table for the broadcasted data
+val result = input1.join(input2, JoinHint.BROADCAST_HASH_FIRST)
+                   .where(0).equalTo(1)
 {% endhighlight %}
       </td>
     </tr>
@@ -797,7 +830,7 @@ val result = input1.join(input2).where(0).equalTo(1)
         <p>The two-dimensional variant of the reduce operation. Groups each input on one or more
         fields and then joins the groups. The transformation function is called per pair of groups.
         See <a href="#specifying-keys">keys</a> on how to define coGroup keys.</p>
-{% highlight java %}
+{% highlight scala %}
 data1.coGroup(data2).where(0).equalTo(1)
 {% endhighlight %}
       </td>
@@ -809,7 +842,7 @@ data1.coGroup(data2).where(0).equalTo(1)
         <p>Builds the Cartesian product (cross product) of two inputs, creating all pairs of
         elements. Optionally uses a CrossFunction to turn the pair of elements into a single
         element</p>
-{% highlight java %}
+{% highlight scala %}
 val data1: DataSet[Int] = // [...]
 val data2: DataSet[String] = // [...]
 val result: DataSet[(Int, String)] = data1.cross(data2)

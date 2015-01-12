@@ -16,28 +16,30 @@
  * limitations under the License.
  */
 
-package org.apache.flink.core.memory;
+package org.apache.flink.streaming.api.datastream.temporaloperator;
 
-import java.io.IOException;
-import java.io.OutputStream;
+import java.util.concurrent.TimeUnit;
 
-public final class DataOutputViewStream extends OutputStream {
+public interface TemporalWindow<T> {
 
-	private final DataOutputView outputView;
-	
-	
-	public DataOutputViewStream(DataOutputView outputView) {
-		this.outputView = outputView;
-	}
+	/**
+	 * Defines the slide interval for this temporal operator
+	 * 
+	 * @param length
+	 *            Length of the window
+	 * @param timeUnit
+	 *            Unit of time
+	 * @return The temporal operator with slide interval specified
+	 */
+	public T every(long length, TimeUnit timeUnit);
 
+	/**
+	 * Defines the slide interval for this temporal operator
+	 * 
+	 * @param length
+	 *            Length of the window
+	 * @return The temporal operator with slide interval specified
+	 */
+	public T every(long length);
 
-	@Override
-	public void write(int b) throws IOException {
-		outputView.write(b);
-	}
-	
-	@Override
-	public void write(byte[] b, int off, int len) throws IOException {
-		outputView.write(b, off, len);
-	}
 }
