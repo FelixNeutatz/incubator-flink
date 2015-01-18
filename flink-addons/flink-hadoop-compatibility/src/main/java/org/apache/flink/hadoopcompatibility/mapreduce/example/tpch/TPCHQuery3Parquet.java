@@ -111,7 +111,7 @@ public class TPCHQuery3Parquet {
 		DataSet<Lineitem> lineitems = getLineitemDataSet(env).map(new MapLineitems());
 		DataSet<Order> orders = getOrdersDataSet(env).map(new MapOrders());
 		DataSet<Customer> customers = getCustomerDataSet(env).map(new MapCustomers());
-
+		
 		// Join customers with orders and package them into a ShippingPriorityItem
 		DataSet<ShippingPriorityItem> customerWithOrders =
 				customers.join(orders).where(0).equalTo(1)
@@ -248,7 +248,7 @@ public class TPCHQuery3Parquet {
 	
 	private static DataSet<Tuple2<Void, LineitemTable>> getLineitemDataSet(ExecutionEnvironment env) throws IOException {
 
-		env.setDegreeOfParallelism(4);
+		//env.setDegreeOfParallelism(1);
 
 		Job job = Job.getInstance();
 
@@ -271,7 +271,7 @@ public class TPCHQuery3Parquet {
 	
 	
 	private static DataSet<Tuple2<Void, CustomerTable>> getCustomerDataSet(ExecutionEnvironment env) throws IOException {
-		env.setDegreeOfParallelism(4);
+		//env.setDegreeOfParallelism(1);
 
 		Job job = Job.getInstance();
 
@@ -292,7 +292,7 @@ public class TPCHQuery3Parquet {
 	}
 	
 	private static DataSet<Tuple2<Void, OrderTable>> getOrdersDataSet(ExecutionEnvironment env) throws IOException {
-		env.setDegreeOfParallelism(4);
+		//env.setDegreeOfParallelism(1);
 
 		Job job = Job.getInstance();
 
