@@ -57,8 +57,9 @@ public class OutputEmitterTest {
 	public void testPartitionHash() {
 		// Test for IntValue
 		@SuppressWarnings({"unchecked", "rawtypes"})
+		final int numberTaskManager = 1;
 		final TypeComparator<Record> intComp = new RecordComparatorFactory(new int[] {0}, new Class[] {IntValue.class}).createComparator();
-		final ChannelSelector<SerializationDelegate<Record>> oe1 = new OutputEmitter<Record>(ShipStrategyType.PARTITION_HASH, intComp);
+		final ChannelSelector<SerializationDelegate<Record>> oe1 = new OutputEmitter<Record>(ShipStrategyType.PARTITION_HASH, intComp, numberTaskManager);
 		final SerializationDelegate<Record> delegate = new SerializationDelegate<Record>(new RecordSerializerFactory().getSerializer());
 		
 		int numChans = 100;
@@ -87,7 +88,7 @@ public class OutputEmitterTest {
 		// Test for StringValue
 		@SuppressWarnings({"unchecked", "rawtypes"})
 		final TypeComparator<Record> stringComp = new RecordComparatorFactory(new int[] {0}, new Class[] {StringValue.class}).createComparator();
-		final ChannelSelector<SerializationDelegate<Record>> oe2 = new OutputEmitter<Record>(ShipStrategyType.PARTITION_HASH, stringComp);
+		final ChannelSelector<SerializationDelegate<Record>> oe2 = new OutputEmitter<Record>(ShipStrategyType.PARTITION_HASH, stringComp, numberTaskManager);
 
 		numChans = 100;
 		numRecs = 10000;
@@ -114,7 +115,7 @@ public class OutputEmitterTest {
 		
 		// test hash corner cases
 		final TestIntComparator testIntComp = new TestIntComparator();
-		final ChannelSelector<SerializationDelegate<Integer>> oe3 = new OutputEmitter<Integer>(ShipStrategyType.PARTITION_HASH, testIntComp);
+		final ChannelSelector<SerializationDelegate<Integer>> oe3 = new OutputEmitter<Integer>(ShipStrategyType.PARTITION_HASH, testIntComp, numberTaskManager);
 		final SerializationDelegate<Integer> intDel = new SerializationDelegate<Integer>(new IntSerializer());
 		
 		numChans = 100;
@@ -154,8 +155,9 @@ public class OutputEmitterTest {
 	public void testForward() {
 		// Test for IntValue
 		@SuppressWarnings({"unchecked", "rawtypes"})
+		final int numberTaskManager = 1;
 		final TypeComparator<Record> intComp = new RecordComparatorFactory(new int[] {0}, new Class[] {IntValue.class}).createComparator();
-		final ChannelSelector<SerializationDelegate<Record>> oe1 = new OutputEmitter<Record>(ShipStrategyType.FORWARD, intComp);
+		final ChannelSelector<SerializationDelegate<Record>> oe1 = new OutputEmitter<Record>(ShipStrategyType.FORWARD, intComp, numberTaskManager);
 		final SerializationDelegate<Record> delegate = new SerializationDelegate<Record>(new RecordSerializerFactory().getSerializer());
 
 		int numChannels = 100;
@@ -182,7 +184,7 @@ public class OutputEmitterTest {
 		// Test for StringValue
 		@SuppressWarnings({"unchecked", "rawtypes"})
 		final TypeComparator<Record> stringComp = new RecordComparatorFactory(new int[] {0}, new Class[] {StringValue.class}).createComparator();
-		final ChannelSelector<SerializationDelegate<Record>> oe2 = new OutputEmitter<Record>(ShipStrategyType.FORWARD, stringComp);
+		final ChannelSelector<SerializationDelegate<Record>> oe2 = new OutputEmitter<Record>(ShipStrategyType.FORWARD, stringComp, numberTaskManager);
 
 		numChannels = 100;
 		numRecords = 10000 + numChannels / 2;
@@ -209,13 +211,14 @@ public class OutputEmitterTest {
 	@Test
 	public void testForcedRebalance() {
 		// Test for IntValue
+		final int numberTaskManager = 1;
 		int numChannels = 100;
 		int toTaskIndex = numChannels * 6/7;
 		int fromTaskIndex = toTaskIndex + numChannels;
 		int extraRecords = numChannels / 3;
 		int numRecords = 50000 + extraRecords;
 
-		final ChannelSelector<SerializationDelegate<Record>> oe1 = new OutputEmitter<Record>(ShipStrategyType.PARTITION_FORCED_REBALANCE, fromTaskIndex);
+		final ChannelSelector<SerializationDelegate<Record>> oe1 = new OutputEmitter<Record>(ShipStrategyType.PARTITION_FORCED_REBALANCE, fromTaskIndex, numberTaskManager);
 		final SerializationDelegate<Record> delegate = new SerializationDelegate<Record>(new RecordSerializerFactory().getSerializer());
 
 		int[] hit = new int[numChannels];
@@ -249,7 +252,7 @@ public class OutputEmitterTest {
 		extraRecords = numChannels * 2/9;
 		numRecords = 10000 + extraRecords;
 
-		final ChannelSelector<SerializationDelegate<Record>> oe2 = new OutputEmitter<Record>(ShipStrategyType.PARTITION_FORCED_REBALANCE, fromTaskIndex);
+		final ChannelSelector<SerializationDelegate<Record>> oe2 = new OutputEmitter<Record>(ShipStrategyType.PARTITION_FORCED_REBALANCE, fromTaskIndex, numberTaskManager);
 
 		hit = new int[numChannels];
 
@@ -280,8 +283,9 @@ public class OutputEmitterTest {
 	public void testBroadcast() {
 		// Test for IntValue
 		@SuppressWarnings({"unchecked", "rawtypes"})
+		final int numberTaskManager = 1;
 		final TypeComparator<Record> intComp = new RecordComparatorFactory(new int[] {0}, new Class[] {IntValue.class}).createComparator();
-		final ChannelSelector<SerializationDelegate<Record>> oe1 = new OutputEmitter<Record>(ShipStrategyType.BROADCAST, intComp);
+		final ChannelSelector<SerializationDelegate<Record>> oe1 = new OutputEmitter<Record>(ShipStrategyType.BROADCAST, intComp, numberTaskManager);
 		final SerializationDelegate<Record> delegate = new SerializationDelegate<Record>(new RecordSerializerFactory().getSerializer());
 		
 		int numChannels = 100;
@@ -307,7 +311,7 @@ public class OutputEmitterTest {
 		// Test for StringValue
 		@SuppressWarnings({"unchecked", "rawtypes"})
 		final TypeComparator<Record> stringComp = new RecordComparatorFactory(new int[] {0}, new Class[] {StringValue.class}).createComparator();
-		final ChannelSelector<SerializationDelegate<Record>> oe2 = new OutputEmitter<Record>(ShipStrategyType.BROADCAST, stringComp);
+		final ChannelSelector<SerializationDelegate<Record>> oe2 = new OutputEmitter<Record>(ShipStrategyType.BROADCAST, stringComp, numberTaskManager);
 
 		numChannels = 100;
 		numRecords = 5000;
@@ -333,8 +337,9 @@ public class OutputEmitterTest {
 	@Test
 	public void testMultiKeys() {
 		@SuppressWarnings({"unchecked", "rawtypes"})
+		final int numberTaskManager = 1;
 		final TypeComparator<Record> multiComp = new RecordComparatorFactory(new int[] {0,1,3}, new Class[] {IntValue.class, StringValue.class, DoubleValue.class}).createComparator();
-		final ChannelSelector<SerializationDelegate<Record>> oe1 = new OutputEmitter<Record>(ShipStrategyType.PARTITION_HASH, multiComp);
+		final ChannelSelector<SerializationDelegate<Record>> oe1 = new OutputEmitter<Record>(ShipStrategyType.PARTITION_HASH, multiComp, numberTaskManager);
 		final SerializationDelegate<Record> delegate = new SerializationDelegate<Record>(new RecordSerializerFactory().getSerializer());
 		
 		int numChannels = 100;
@@ -368,8 +373,9 @@ public class OutputEmitterTest {
 	public void testMissingKey() {
 		// Test for IntValue
 		@SuppressWarnings({"unchecked", "rawtypes"})
+		final int numberTaskManager = 1;
 		final TypeComparator<Record> intComp = new RecordComparatorFactory(new int[] {1}, new Class[] {IntValue.class}).createComparator();
-		final ChannelSelector<SerializationDelegate<Record>> oe1 = new OutputEmitter<Record>(ShipStrategyType.PARTITION_HASH, intComp);
+		final ChannelSelector<SerializationDelegate<Record>> oe1 = new OutputEmitter<Record>(ShipStrategyType.PARTITION_HASH, intComp, numberTaskManager);
 		final SerializationDelegate<Record> delegate = new SerializationDelegate<Record>(new RecordSerializerFactory().getSerializer());
 		
 		Record rec = new Record(0);
@@ -389,8 +395,9 @@ public class OutputEmitterTest {
 	public void testNullKey() {
 		// Test for IntValue
 		@SuppressWarnings({"unchecked", "rawtypes"})
+		final int numberTaskManager = 1;
 		final TypeComparator<Record> intComp = new RecordComparatorFactory(new int[] {0}, new Class[] {IntValue.class}).createComparator();
-		final ChannelSelector<SerializationDelegate<Record>> oe1 = new OutputEmitter<Record>(ShipStrategyType.PARTITION_HASH, intComp);
+		final ChannelSelector<SerializationDelegate<Record>> oe1 = new OutputEmitter<Record>(ShipStrategyType.PARTITION_HASH, intComp, numberTaskManager);
 		final SerializationDelegate<Record> delegate = new SerializationDelegate<Record>(new RecordSerializerFactory().getSerializer());
 		
 		Record rec = new Record(2);
@@ -411,8 +418,9 @@ public class OutputEmitterTest {
 		
 		// Test for IntValue
 		@SuppressWarnings({"unchecked", "rawtypes"})
+		final int numberTaskManager = 1;
 		final TypeComparator<Record> doubleComp = new RecordComparatorFactory(new int[] {0}, new Class[] {DoubleValue.class}).createComparator();
-		final ChannelSelector<SerializationDelegate<Record>> oe1 = new OutputEmitter<Record>(ShipStrategyType.PARTITION_HASH, doubleComp);
+		final ChannelSelector<SerializationDelegate<Record>> oe1 = new OutputEmitter<Record>(ShipStrategyType.PARTITION_HASH, doubleComp, numberTaskManager);
 		final SerializationDelegate<Record> delegate = new SerializationDelegate<Record>(new RecordSerializerFactory().getSerializer());
 		
 		

@@ -58,6 +58,8 @@ public class OutputEmitter<T> implements ChannelSelector<SerializationDelegate<T
 	private Object[] keys;
 	
 	private Object[] extractedKeys;
+	
+	private final int numberTaskManager;
 
 	// ------------------------------------------------------------------------
 	// Constructors
@@ -66,28 +68,27 @@ public class OutputEmitter<T> implements ChannelSelector<SerializationDelegate<T
 	/**
 	 * Creates a new channel selector that uses the given strategy (broadcasting, partitioning, ...)
 	 * and uses the supplied task index perform a round robin distribution.
-	 * 
+	 *
 	 * @param strategy The distribution strategy to be used.
 	 */
-	public OutputEmitter(ShipStrategyType strategy, int indexInSubtaskGroup) {
-		this(strategy, indexInSubtaskGroup, null, null, null);
+	public OutputEmitter(ShipStrategyType strategy, int indexInSubtaskGroup, int numberTaskManager) {
+		this(strategy, indexInSubtaskGroup, null, null, null, numberTaskManager);
 	}
 	
 	/**
 	 * Creates a new channel selector that uses the given strategy (broadcasting, partitioning, ...)
 	 * and uses the supplied comparator to hash / compare records for partitioning them deterministically.
-	 * 
+	 *
 	 * @param strategy The distribution strategy to be used.
 	 * @param comparator The comparator used to hash / compare the records.
 	 */
-	public OutputEmitter(ShipStrategyType strategy, TypeComparator<T> comparator) {
-		this(strategy, 0, comparator, null, null);
+	public OutputEmitter(ShipStrategyType strategy, TypeComparator<T> comparator, int numberTaskManager) {
+		this(strategy, 0, comparator, null, null, numberTaskManager);
 	}
-	
-	
+
 	@SuppressWarnings("unchecked")
-	public OutputEmitter(ShipStrategyType strategy, int indexInSubtaskGroup, 
-							TypeComparator<T> comparator, Partitioner<?> partitioner, DataDistribution distribution) {
+	public OutputEmitter(ShipStrategyType strategy, int indexInSubtaskGroup, TypeComparator<T> comparator, 
+						Partitioner<?> partitioner, DataDistribution distribution, int numberTaskManager) {
 		if (strategy == null) { 
 			throw new NullPointerException();
 		}
@@ -97,6 +98,7 @@ public class OutputEmitter<T> implements ChannelSelector<SerializationDelegate<T
 		this.comparator = comparator;
 		this.partitioner = (Partitioner<Object>) partitioner;
 		this.distribution = distribution;
+		this.numberTaskManager = numberTaskManager;
 
 
 		switch (strategy) {
@@ -176,8 +178,12 @@ public class OutputEmitter<T> implements ChannelSelector<SerializationDelegate<T
 
 	private int[] broadcast(int numberOfChannels) {
 		if (channels == null || channels.length != numberOfChannels) {
-			channels = new int[numberOfChannels];
-			for (int i = 0; i < numberOfChannels; i++) {
+			int numberNodes = numberTaskManager;
+			if (numberOfChannels < numberTaskManager) {
+				numberNodes = numberOfChannels;
+			}
+			channels = new int[numberNodes];
+			for (int i = 0; i < numberNodes; i++) {
 				channels[i] = i;
 			}
 		}

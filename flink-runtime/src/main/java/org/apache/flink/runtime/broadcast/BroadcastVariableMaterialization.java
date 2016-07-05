@@ -71,8 +71,6 @@ public class BroadcastVariableMaterialization<T, C> {
 		Preconditions.checkNotNull(serializerFactory);
 		Preconditions.checkNotNull(referenceHolder);
 		
-		final boolean materializer;
-		
 		// hold the reference lock only while we track references and decide who should be the materializer
 		// that way, other tasks can de-register (in case of failure) while materialization is happening
 		synchronized (references) {
@@ -87,8 +85,6 @@ public class BroadcastVariableMaterialization<T, C> {
 								referenceHolder.getEnvironment().getTaskInfo().getTaskNameWithSubtasks(),
 								key.toString()));
 			}
-			
-			materializer = references.size() == 1;
 		}
 
 		try {
@@ -100,19 +96,19 @@ public class BroadcastVariableMaterialization<T, C> {
 
 			final ReaderIterator<T> readerIterator = new ReaderIterator<T>(typedReader, serializer);
 			
-			if (materializer) {
-				// first one, so we need to materialize;
-				if (LOG.isDebugEnabled()) {
-					LOG.debug("Getting Broadcast Variable (" + key + ") - First access, materializing.");
-				}
-				
-				ArrayList<T> data = new ArrayList<T>();
-				
-				T element;
-				while ((element = readerIterator.next()) != null) {
-					data.add(element);
-				}
-				
+			// first one, so we need to materialize;
+			if (LOG.isDebugEnabled()) {
+				LOG.debug("Getting Broadcast Variable (" + key + ") - Try to materialize.");
+			}
+
+			ArrayList<T> data = new ArrayList<T>();
+
+			T element;
+			while ((element = readerIterator.next()) != null) {
+				data.add(element);
+			}
+			
+			if (!data.isEmpty()) {
 				synchronized (materializationMonitor) {
 					this.data = data;
 					this.materialized = true;
@@ -124,21 +120,15 @@ public class BroadcastVariableMaterialization<T, C> {
 				}
 			}
 			else {
-				// successor: discard all data and refer to the shared variable
-				
 				if (LOG.isDebugEnabled()) {
 					LOG.debug("Getting Broadcast Variable (" + key + ") - shared access.");
 				}
-				
-				T element = serializer.createInstance();
-				while ((element = readerIterator.next(element)) != null);
-				
+
 				synchronized (materializationMonitor) {
 					while (!this.materialized && !disposed) {
 						materializationMonitor.wait();
 					}
 				}
-				
 			}
 		}
 		catch (Throwable t) {
