@@ -24,10 +24,7 @@ import org.apache.flink.api.common.accumulators.Accumulator;
 import org.apache.flink.runtime.JobException;
 import org.apache.flink.runtime.accumulators.AccumulatorRegistry;
 import org.apache.flink.runtime.accumulators.StringifiedAccumulatorResult;
-import org.apache.flink.runtime.deployment.InputChannelDeploymentDescriptor;
-import org.apache.flink.runtime.deployment.PartialInputChannelDeploymentDescriptor;
-import org.apache.flink.runtime.deployment.ResultPartitionLocation;
-import org.apache.flink.runtime.deployment.TaskDeploymentDescriptor;
+import org.apache.flink.runtime.deployment.*;
 import org.apache.flink.runtime.execution.ExecutionState;
 import org.apache.flink.runtime.instance.Instance;
 import org.apache.flink.runtime.instance.InstanceConnectionInfo;
@@ -266,7 +263,7 @@ public class Execution implements Serializable {
 	 * @throws IllegalStateException Thrown, if the vertex is not in CREATED state, which is the only state that permits scheduling.
 	 * @throws NoResourceAvailableException Thrown is no queued scheduling is allowed and no resources are currently available.
 	 */
-	public boolean scheduleForExecution(Scheduler scheduler, boolean queued) throws NoResourceAvailableException {
+	public boolean scheduleForExecution(final Scheduler scheduler, boolean queued) throws NoResourceAvailableException {
 		if (scheduler == null) {
 			throw new IllegalArgumentException("Cannot send null Scheduler when scheduling execution.");
 		}
@@ -294,7 +291,7 @@ public class Execution implements Serializable {
 					@Override
 					public void slotAllocated(SimpleSlot slot) {
 						try {
-							deployToSlot(slot);
+							deployToSlot(slot, scheduler);
 						}
 						catch (Throwable t) {
 							try {
@@ -309,7 +306,7 @@ public class Execution implements Serializable {
 			else {
 				SimpleSlot slot = scheduler.scheduleImmediately(toSchedule);
 				try {
-					deployToSlot(slot);
+					deployToSlot(slot, scheduler);
 				}
 				catch (Throwable t) {
 					try {
@@ -325,6 +322,101 @@ public class Execution implements Serializable {
 		else {
 			// call race, already deployed, or already done
 			return false;
+		}
+	}
+
+	public void deployToSlot(final SimpleSlot slot, Scheduler scheduler) throws JobException {
+		// sanity checks
+		if (slot == null) {
+			throw new NullPointerException();
+		}
+		if (!slot.isAlive()) {
+			throw new JobException("Target slot for deployment is not alive.");
+		}
+
+		// make sure exactly one deployment call happens from the correct state
+		// note: the transition from CREATED to DEPLOYING is for testing purposes only
+		ExecutionState previous = this.state;
+		if (previous == SCHEDULED || previous == CREATED) {
+			if (!transitionState(previous, DEPLOYING)) {
+				// race condition, someone else beat us to the deploying call.
+				// this should actually not happen and indicates a race somewhere else
+				throw new IllegalStateException("Cannot deploy task: Concurrent deployment call race.");
+			}
+		}
+		else {
+			// vertex may have been cancelled, or it was already scheduled
+			throw new IllegalStateException("The vertex must be in CREATED or SCHEDULED state to be deployed. Found state " + previous);
+		}
+
+		try {
+			// good, we are allowed to deploy
+			if (!slot.setExecutedVertex(this)) {
+				throw new JobException("Could not assign the ExecutionVertex to the slot " + slot);
+			}
+			this.assignedResource = slot;
+			this.assignedResourceLocation = slot.getInstance().getInstanceConnectionInfo();
+
+			// race double check, did we fail/cancel and do we need to release the slot?
+			if (this.state != DEPLOYING) {
+				slot.releaseSlot();
+				return;
+			}
+
+			if (LOG.isInfoEnabled()) {
+				LOG.info(String.format("Deploying %s (attempt #%d) to %s", vertex.getSimpleName(),
+						attemptNumber, slot.getInstance().getInstanceConnectionInfo().getHostname()));
+			}
+			
+			final TaskDeploymentDescriptor deployment = vertex.createDeploymentDescriptor(
+				scheduler.getTaskManagerIDByInstance(slot.getInstance()),
+				attemptId,
+				slot,
+				operatorState,
+				operatorKvState,
+				recoveryTimestamp,
+				attemptNumber);
+			
+			// register this execution at the execution graph, to receive call backs
+			vertex.getExecutionGraph().registerExecution(this);
+
+			final Instance instance = slot.getInstance();
+			final ActorGateway gateway = instance.getActorGateway();
+
+			for (InputGateDeploymentDescriptor gate: deployment.getInputGates()) {
+				System.err.println("Execution.java: "+ "actor: " + gateway.path() + " vertex: " + vertex.getParallelSubtaskIndex() + " gate: " + gate.getConsumedSubpartitionIndex());
+			}
+
+			final Future<Object> deployAction = gateway.ask(new SubmitTask(deployment), timeout);
+
+			deployAction.onComplete(new OnComplete<Object>(){
+
+				@Override
+				public void onComplete(Throwable failure, Object success) throws Throwable {
+					if (failure != null) {
+						if (failure instanceof TimeoutException) {
+							String taskname = deployment.getTaskInfo().getTaskNameWithSubtasks() + " (" + attemptId + ')';
+
+							markFailed(new Exception(
+									"Cannot deploy task " + taskname + " - TaskManager (" + instance
+									+ ") not responding after a timeout of " + timeout, failure));
+						}
+						else {
+							markFailed(failure);
+						}
+					}
+					else {
+						if (!(success.equals(Messages.getAcknowledge()))) {
+							markFailed(new Exception("Failed to deploy the task to slot. Response was not of type 'Acknowledge', but was " + success
+									+ "\nSlot Details: " + slot));
+						}
+					}
+				}
+			}, executionContext);
+		}
+		catch (Throwable t) {
+			markFailed(t);
+			ExceptionUtils.rethrow(t);
 		}
 	}
 
@@ -368,10 +460,11 @@ public class Execution implements Serializable {
 
 			if (LOG.isInfoEnabled()) {
 				LOG.info(String.format("Deploying %s (attempt #%d) to %s", vertex.getSimpleName(),
-						attemptNumber, slot.getInstance().getInstanceConnectionInfo().getHostname()));
+					attemptNumber, slot.getInstance().getInstanceConnectionInfo().getHostname()));
 			}
 
 			final TaskDeploymentDescriptor deployment = vertex.createDeploymentDescriptor(
+				-1,
 				attemptId,
 				slot,
 				operatorState,
@@ -385,6 +478,10 @@ public class Execution implements Serializable {
 			final Instance instance = slot.getInstance();
 			final ActorGateway gateway = instance.getActorGateway();
 
+			for (InputGateDeploymentDescriptor gate: deployment.getInputGates()) {
+				System.err.println("Execution.java: "+ "actor: " + gateway.path() + " vertex: " + vertex.getParallelSubtaskIndex() + " gate: " + gate.getConsumedSubpartitionIndex());
+			}
+
 			final Future<Object> deployAction = gateway.ask(new SubmitTask(deployment), timeout);
 
 			deployAction.onComplete(new OnComplete<Object>(){
@@ -396,7 +493,7 @@ public class Execution implements Serializable {
 							String taskname = deployment.getTaskInfo().getTaskNameWithSubtasks() + " (" + attemptId + ')';
 
 							markFailed(new Exception(
-									"Cannot deploy task " + taskname + " - TaskManager (" + instance
+								"Cannot deploy task " + taskname + " - TaskManager (" + instance
 									+ ") not responding after a timeout of " + timeout, failure));
 						}
 						else {
@@ -406,7 +503,7 @@ public class Execution implements Serializable {
 					else {
 						if (!(success.equals(Messages.getAcknowledge()))) {
 							markFailed(new Exception("Failed to deploy the task to slot. Response was not of type 'Acknowledge', but was " + success
-									+ "\nSlot Details: " + slot));
+								+ "\nSlot Details: " + slot));
 						}
 					}
 				}
@@ -536,6 +633,8 @@ public class Execution implements Serializable {
 
 				consumerVertex.cachePartitionInfo(PartialInputChannelDeploymentDescriptor.fromEdge(
 						partition, partitionExecution));
+				
+				//here
 
 				// When deploying a consuming task, its task deployment descriptor will contain all
 				// deployment information available at the respective time. It is possible that some

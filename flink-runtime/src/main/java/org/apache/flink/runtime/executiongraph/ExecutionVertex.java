@@ -83,7 +83,7 @@ public class ExecutionVertex implements Serializable {
 
 	private Map<IntermediateResultPartitionID, IntermediateResultPartition> resultPartitions;
 
-	private ExecutionEdge[][] inputEdges;
+	public ExecutionEdge[][] inputEdges;
 
 	private final int subTaskIndex;
 
@@ -454,6 +454,7 @@ public class ExecutionVertex implements Serializable {
 		return this.currentExecution.scheduleForExecution(scheduler, queued);
 	}
 
+	
 	public void deployToSlot(SimpleSlot slot) throws JobException {
 		this.currentExecution.deployToSlot(slot);
 	}
@@ -633,7 +634,7 @@ public class ExecutionVertex implements Serializable {
 	 * 
 	 * TODO: This should actually be in the EXECUTION
 	 */
-	TaskDeploymentDescriptor createDeploymentDescriptor(
+	TaskDeploymentDescriptor createDeploymentDescriptor(int taskManagerID,
 			ExecutionAttemptID executionId,
 			SimpleSlot targetSlot,
 			SerializedValue<StateHandle<?>> operatorState,
@@ -664,6 +665,8 @@ public class ExecutionVertex implements Serializable {
 
 			IntermediateDataSetID resultId = edges[0].getSource().getIntermediateResult().getId();
 
+			System.err.println("ExecutionVertex.java: subTask: "+ subTaskIndex + " queueToRequest: " + queueToRequest);
+			
 			consumedPartitions.add(new InputGateDeploymentDescriptor(resultId, queueToRequest, partitions));
 		}
 
@@ -671,7 +674,7 @@ public class ExecutionVertex implements Serializable {
 		List<BlobKey> jarFiles = getExecutionGraph().getRequiredJarFiles();
 		List<URL> classpaths = getExecutionGraph().getRequiredClasspaths();
 
-		return new TaskDeploymentDescriptor(
+		return new TaskDeploymentDescriptor(taskManagerID,
 			getJobId(),
 			getExecutionGraph().getJobName(),
 			getJobvertexId(),

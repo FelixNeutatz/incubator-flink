@@ -94,11 +94,55 @@ public final class TaskDeploymentDescriptor implements Serializable {
 	private final SerializedValue<ExecutionConfig> serializedExecutionConfig;
 
 	private long recoveryTimestamp;
+	
+	private final int taskManagerID;
+
+	public TaskDeploymentDescriptor(JobID jobID,
+									String jobName,
+									JobVertexID vertexID,
+									ExecutionAttemptID executionId,
+									SerializedValue<ExecutionConfig> serializedExecutionConfig,
+									String taskName,
+									int indexInSubtaskGroup,
+									int numberOfSubtasks,
+									int attemptNumber,
+									Configuration jobConfiguration,
+									Configuration taskConfiguration,
+									String invokableClassName,
+									List<ResultPartitionDeploymentDescriptor> producedPartitions,
+									List<InputGateDeploymentDescriptor> inputGates,
+									List<BlobKey> requiredJarFiles,
+									List<URL> requiredClasspaths,
+									int targetSlotNumber,
+									SerializedValue<StateHandle<?>> operatorState,
+									long recoveryTimestamp) {
+
+		this(-1,
+			jobID,
+			jobName,
+			vertexID,
+			executionId,
+			serializedExecutionConfig,
+			taskName,
+			indexInSubtaskGroup,
+			numberOfSubtasks,
+			attemptNumber,
+			jobConfiguration,
+			taskConfiguration,
+			invokableClassName,
+			producedPartitions,
+			inputGates,
+			requiredJarFiles,
+			requiredClasspaths,
+			targetSlotNumber,
+			null,
+			-1);
+	}
 		
 	/**
 	 * Constructs a task deployment descriptor.
 	 */
-	public TaskDeploymentDescriptor(
+	public TaskDeploymentDescriptor(int taskManagerID,
 			JobID jobID,
 			String jobName,
 			JobVertexID vertexID,
@@ -124,6 +168,7 @@ public final class TaskDeploymentDescriptor implements Serializable {
 		checkArgument(targetSlotNumber >= 0);
 		checkArgument(attemptNumber >= 0);
 
+		this.taskManagerID = taskManagerID;
 		this.jobID = checkNotNull(jobID);
 		this.jobName = checkNotNull(jobName);
 		this.vertexID = checkNotNull(vertexID);
@@ -145,7 +190,7 @@ public final class TaskDeploymentDescriptor implements Serializable {
 		this.recoveryTimestamp = recoveryTimestamp;
 	}
 
-	public TaskDeploymentDescriptor(
+	public TaskDeploymentDescriptor(int taskManagerID,
 		JobID jobID,
 		String jobName,
 		JobVertexID vertexID,
@@ -164,7 +209,48 @@ public final class TaskDeploymentDescriptor implements Serializable {
 		List<URL> requiredClasspaths,
 		int targetSlotNumber) {
 
-		this(
+		this(taskManagerID,
+			jobID,
+			jobName,
+			vertexID,
+			executionId,
+			serializedExecutionConfig,
+			taskName,
+			indexInSubtaskGroup,
+			numberOfSubtasks,
+			attemptNumber,
+			jobConfiguration,
+			taskConfiguration,
+			invokableClassName,
+			producedPartitions,
+			inputGates,
+			requiredJarFiles,
+			requiredClasspaths,
+			targetSlotNumber,
+			null,
+			-1);
+	}
+
+	public TaskDeploymentDescriptor(
+									JobID jobID,
+									String jobName,
+									JobVertexID vertexID,
+									ExecutionAttemptID executionId,
+									SerializedValue<ExecutionConfig> serializedExecutionConfig,
+									String taskName,
+									int indexInSubtaskGroup,
+									int numberOfSubtasks,
+									int attemptNumber,
+									Configuration jobConfiguration,
+									Configuration taskConfiguration,
+									String invokableClassName,
+									List<ResultPartitionDeploymentDescriptor> producedPartitions,
+									List<InputGateDeploymentDescriptor> inputGates,
+									List<BlobKey> requiredJarFiles,
+									List<URL> requiredClasspaths,
+									int targetSlotNumber) {
+
+		this(-1,
 			jobID,
 			jobName,
 			vertexID,
@@ -235,6 +321,11 @@ public final class TaskDeploymentDescriptor implements Serializable {
 	 */
 	public int getNumberOfSubtasks() {
 		return numberOfSubtasks;
+	}
+
+
+	public int getTaskManagerID() {
+		return taskManagerID;
 	}
 
 	/**

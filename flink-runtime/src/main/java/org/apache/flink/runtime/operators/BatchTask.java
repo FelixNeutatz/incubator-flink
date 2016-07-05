@@ -28,6 +28,7 @@ import org.apache.flink.api.common.functions.util.FunctionUtils;
 import org.apache.flink.api.common.typeutils.TypeComparator;
 import org.apache.flink.api.common.typeutils.TypeComparatorFactory;
 import org.apache.flink.api.common.typeutils.TypeSerializerFactory;
+import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.io.IOReadableWritable;
 import org.apache.flink.metrics.MetricGroup;
@@ -1228,16 +1229,21 @@ public class BatchTask<S extends Function, OT> extends AbstractInvokable impleme
 			final int indexInSubtaskGroup = task.getIndexInSubtaskGroup();
 			final TypeComparatorFactory<T> compFactory = config.getOutputComparator(i, cl);
 
+			final int numberSlots = task.getEnvironment().getTaskManagerInfo().getConfiguration().getInteger(
+				ConfigConstants.TASK_MANAGER_NUM_TASK_SLOTS, 1);
+			final int numberTaskManager = task.getEnvironment().getJobConfiguration().getInteger(
+				"TASK_MANAGER_NUM", numberSlots);
+
 			final ChannelSelector<SerializationDelegate<T>> oe;
 			if (compFactory == null) {
-				oe = new OutputEmitter<T>(strategy, indexInSubtaskGroup);
+				oe = new OutputEmitter<T>(strategy, indexInSubtaskGroup, numberTaskManager);
 			}
 			else {
 				final DataDistribution dataDist = config.getOutputDataDistribution(i, cl);
 				final Partitioner<?> partitioner = config.getOutputPartitioner(i, cl);
 
 				final TypeComparator<T> comparator = compFactory.createComparator();
-				oe = new OutputEmitter<T>(strategy, indexInSubtaskGroup, comparator, partitioner, dataDist);
+				oe = new OutputEmitter<T>(strategy, indexInSubtaskGroup, comparator, partitioner, dataDist, numberTaskManager);
 			}
 
 			final RecordWriter<SerializationDelegate<T>> recordWriter =

@@ -716,6 +716,8 @@ public class ExecutionGraph implements Serializable {
 
 		if (transitionState(JobStatus.CREATED, JobStatus.RUNNING)) {
 			this.scheduler = scheduler;
+			
+			
 
 			switch (scheduleMode) {
 

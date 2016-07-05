@@ -256,15 +256,15 @@ public abstract class AbstractIterativeTask<S extends Function, OT> extends Batc
 		
 		for (int inputNum : this.iterativeBroadcastInputs) {
 			MutableReader<?> reader = this.broadcastInputReaders[inputNum];
-
+			
 			if (!reader.isFinished()) {
-				
+				/*
 				// sanity check that the BC input is at the end of the superstep
 				if (!reader.hasReachedEndOfSuperstep()) {
 					throw new IllegalStateException("An iterative broadcast input has not been fully consumed.");
 				}
 				
-				reader.startNextSuperstep();
+				reader.startNextSuperstep();*/
 			}
 		}
 	}

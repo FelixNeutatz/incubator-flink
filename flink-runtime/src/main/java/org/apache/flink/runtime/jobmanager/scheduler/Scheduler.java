@@ -18,16 +18,7 @@
 
 package org.apache.flink.runtime.jobmanager.scheduler;
 
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Queue;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -37,6 +28,7 @@ import akka.dispatch.Futures;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 
+import org.apache.flink.runtime.executiongraph.ExecutionEdge;
 import org.apache.flink.runtime.instance.SlotSharingGroupAssignment;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.instance.SharedSlot;
@@ -72,7 +64,7 @@ public class Scheduler implements InstanceListener, SlotAvailabilityListener {
 	private final Object globalLock = new Object();
 	
 	/** All instances that the scheduler can deploy to */
-	private final Set<Instance> allInstances = new HashSet<Instance>();
+	private final Set<Instance> allInstances = new LinkedHashSet<Instance>();
 	
 	/** All instances by hostname */
 	private final HashMap<String, Set<Instance>> allInstancesByHost = new HashMap<String, Set<Instance>>();
@@ -130,6 +122,7 @@ public class Scheduler implements InstanceListener, SlotAvailabilityListener {
 	public SimpleSlot scheduleImmediately(ScheduledUnit task) throws NoResourceAvailableException {
 		Object ret = scheduleTask(task, false);
 		if (ret instanceof SimpleSlot) {
+			System.err.println("scheduler.java: " + "slot:" + ((SimpleSlot) ret).getInstance().getResourceId() + " actor: " +  ((SimpleSlot) ret).getInstance().getActorGateway().path() +  " task subtaskindex: " + task.getTaskToExecute().getVertex().getParallelSubtaskIndex());
 			return (SimpleSlot) ret;
 		}
 		else {
@@ -140,9 +133,11 @@ public class Scheduler implements InstanceListener, SlotAvailabilityListener {
 	public SlotAllocationFuture scheduleQueued(ScheduledUnit task) throws NoResourceAvailableException {
 		Object ret = scheduleTask(task, true);
 		if (ret instanceof SimpleSlot) {
+			System.err.println("scheduler.java: queued" + "slot:" + ((SimpleSlot) ret).getInstance().getResourceId() + " actor: " +  ((SimpleSlot) ret).getInstance().getActorGateway().path() +  " task subtaskindex: " + task.getTaskToExecute().getVertex().getParallelSubtaskIndex());
 			return new SlotAllocationFuture((SimpleSlot) ret);
 		}
 		if (ret instanceof SlotAllocationFuture) {
+			//System.err.println("scheduler.java: future" + "slot:" + ((SlotAllocationFuture) ret) + " actor: " +  ((SimpleSlot) ret).getInstance().getActorGateway().path() +  " task subtaskindex: " + task.getTaskToExecute().getVertex().getParallelSubtaskIndex());
 			return (SlotAllocationFuture) ret;
 		}
 		else {
@@ -162,6 +157,12 @@ public class Scheduler implements InstanceListener, SlotAvailabilityListener {
 		}
 
 		final ExecutionVertex vertex = task.getTaskToExecute().getVertex();
+
+		for (ExecutionEdge[] edges : vertex.inputEdges) {
+			int subTaskIndex = vertex.getParallelSubtaskIndex();
+			int numConsumerEdges = vertex.getInputEdges(0)[0].getSource().getConsumers().get(0).size();
+			System.err.println("scheduler.java: " + "subTaskIndex" + subTaskIndex);
+		}
 		
 		final Iterable<Instance> preferredLocations = vertex.getPreferredLocations();
 		final boolean forceExternalLocation = vertex.isScheduleLocalOnly() &&
@@ -300,6 +301,12 @@ public class Scheduler implements InstanceListener, SlotAvailabilityListener {
 					ExceptionUtils.rethrow(t, "An error occurred while allocating a slot in a sharing group");
 				}
 
+				for (ExecutionEdge[] edges : vertex.inputEdges) {
+					int subTaskIndex = vertex.getParallelSubtaskIndex();
+					int numConsumerEdges = vertex.getInputEdges(0)[0].getSource().getConsumers().get(0).size();
+					System.err.println("scheduler.java: " + "subTaskIndex" + subTaskIndex);
+				}
+
 				return toUse;
 			}
 			else {
@@ -309,6 +316,13 @@ public class Scheduler implements InstanceListener, SlotAvailabilityListener {
 				SimpleSlot slot = getFreeSlotForTask(vertex, preferredLocations, forceExternalLocation);
 				if (slot != null) {
 					updateLocalityCounters(slot, vertex);
+
+					for (ExecutionEdge[] edges : vertex.inputEdges) {
+						int subTaskIndex = vertex.getParallelSubtaskIndex();
+						int numConsumerEdges = vertex.getInputEdges(0)[0].getSource().getConsumers().get(0).size();
+						System.err.println("scheduler: " + "subTaskIndex" + subTaskIndex % numConsumerEdges);
+					}
+					
 					return slot;
 				}
 				else {
@@ -316,6 +330,13 @@ public class Scheduler implements InstanceListener, SlotAvailabilityListener {
 					if (queueIfNoResource) {
 						SlotAllocationFuture future = new SlotAllocationFuture();
 						this.taskQueue.add(new QueuedTask(task, future));
+
+						for (ExecutionEdge[] edges : vertex.inputEdges) {
+							int subTaskIndex = vertex.getParallelSubtaskIndex();
+							int numConsumerEdges = vertex.getInputEdges(0)[0].getSource().getConsumers().get(0).size();
+							System.err.println("scheduler: " + "subTaskIndex" + subTaskIndex % numConsumerEdges);
+						}
+						
 						return future;
 					}
 					else if (forceExternalLocation) {
@@ -808,6 +829,18 @@ public class Scheduler implements InstanceListener, SlotAvailabilityListener {
 		}
 
 		return bld.toString();
+	}
+	
+	public int getTaskManagerIDByInstance(Instance inst){
+		Iterator<Instance> iter = allInstances.iterator();
+		int i = 1;
+		while(iter.hasNext()) {
+			if (iter.next().getResourceId().equals(inst.getResourceId())) {
+				return i;
+			}
+			i++;
+		}
+		return -1;
 	}
 	
 	// ------------------------------------------------------------------------

@@ -1062,6 +1062,10 @@ class JobManager(
    * @param isRecovery Flag indicating whether this is a recovery or initial submission
    */
   private def submitJob(jobGraph: JobGraph, jobInfo: JobInfo, isRecovery: Boolean = false): Unit = {
+
+    val numberTaskManager = instanceManager.getNumberOfRegisteredTaskManagers
+    jobGraph.getJobConfiguration.setInteger("TASK_MANAGER_NUM", numberTaskManager)
+    
     if (jobGraph == null) {
       jobInfo.client ! decorateMessage(JobResultFailure(
         new SerializedThrowable(
@@ -1344,6 +1348,10 @@ class JobManager(
             // the job.
             log.info(s"Scheduling job $jobId ($jobName).")
 
+            System.err.println("starting scheduling");
+            
+            
+            
             executionGraph.scheduleForExecution(scheduler)
           } else {
             // Remove the job graph. Otherwise it will be lingering around and possibly removed from

@@ -43,6 +43,8 @@ abstract class AbstractRecordReader<T extends IOReadableWritable> extends Abstra
 	private RecordDeserializer<T> currentRecordDeserializer;
 
 	private boolean isFinished;
+	
+	private boolean isDone;
 
 	/**
 	 * Creates a new AbstractRecordReader that de-serializes records from the given input gate and
@@ -113,6 +115,10 @@ abstract class AbstractRecordReader<T extends IOReadableWritable> extends Abstra
 				}
 			}
 		}
+	}
+
+	public void setFinished(boolean finished) {
+		isFinished = finished;
 	}
 
 	public void clearBuffers() {

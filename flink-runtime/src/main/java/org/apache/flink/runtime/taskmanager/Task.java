@@ -172,7 +172,7 @@ public class Task implements Runnable {
 	private final Map<IntermediateDataSetID, SingleInputGate> inputGatesById;
 
 	/** Gateway to the TaskManager that spawned this task */
-	private final ActorGateway taskManager;
+	public final ActorGateway taskManager;
 
 	/** Gateway to the JobManager */
 	private final ActorGateway jobManager;
@@ -230,6 +230,8 @@ public class Task implements Runnable {
 
 	/** Initialized from the Flink configuration. May also be set at the ExecutionConfig */
 	private long taskCancellationInterval;
+	
+	public int taskMangerIndex;
 
 	/**
 	 * <p><b>IMPORTANT:</b> This constructor may not start any work that would need to
@@ -282,6 +284,7 @@ public class Task implements Runnable {
 
 		this.executionListenerActors = new CopyOnWriteArrayList<ActorGateway>();
 		this.metrics = metricGroup;
+		this.taskMangerIndex = tdd.getTaskManagerID();
 
 		// create the reader and writer structures
 
@@ -324,6 +327,8 @@ public class Task implements Runnable {
 
 			this.inputGates[i] = gate;
 			inputGatesById.put(gate.getConsumedResultId(), gate);
+
+			System.err.println("TASK.java: taskname: " + taskInfo.getTaskName() + "taskmanager: " + taskManager.path() + " subparition index: " + gate.consumedSubpartitionIndex);
 		}
 
 		invokableHasBeenCanceled = new AtomicBoolean(false);
