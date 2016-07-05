@@ -1062,6 +1062,10 @@ class JobManager(
    * @param isRecovery Flag indicating whether this is a recovery or initial submission
    */
   private def submitJob(jobGraph: JobGraph, jobInfo: JobInfo, isRecovery: Boolean = false): Unit = {
+
+    val numberTaskManager = instanceManager.getNumberOfRegisteredTaskManagers
+    jobGraph.getJobConfiguration.setInteger("TASK_MANAGER_NUM", numberTaskManager)
+    
     if (jobGraph == null) {
       jobInfo.client ! decorateMessage(JobResultFailure(
         new SerializedThrowable(
