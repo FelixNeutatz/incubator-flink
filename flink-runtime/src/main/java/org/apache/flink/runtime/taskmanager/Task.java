@@ -172,7 +172,7 @@ public class Task implements Runnable {
 	private final Map<IntermediateDataSetID, SingleInputGate> inputGatesById;
 
 	/** Gateway to the TaskManager that spawned this task */
-	private final ActorGateway taskManager;
+	public final ActorGateway taskManager;
 
 	/** Gateway to the JobManager */
 	private final ActorGateway jobManager;
@@ -324,6 +324,8 @@ public class Task implements Runnable {
 
 			this.inputGates[i] = gate;
 			inputGatesById.put(gate.getConsumedResultId(), gate);
+
+			System.err.println("TASK.java: taskname: " + taskInfo.getTaskName() + "taskmanager: " + taskManager.path() + " subparition index: " + gate.consumedSubpartitionIndex);
 		}
 
 		invokableHasBeenCanceled = new AtomicBoolean(false);

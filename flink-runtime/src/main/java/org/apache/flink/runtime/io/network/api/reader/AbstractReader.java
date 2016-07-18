@@ -36,7 +36,7 @@ import static org.apache.flink.util.Preconditions.checkState;
 public abstract class AbstractReader implements ReaderBase {
 
 	/** The input gate to read from. */
-	protected final InputGate inputGate;
+	public final InputGate inputGate;
 
 	/** The task event handler to manage task event subscriptions. */
 	private final TaskEventHandler taskEventHandler = new TaskEventHandler();

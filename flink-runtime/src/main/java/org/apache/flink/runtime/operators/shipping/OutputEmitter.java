@@ -184,7 +184,7 @@ public class OutputEmitter<T> implements ChannelSelector<SerializationDelegate<T
 			}
 			channels = new int[numberNodes];
 			for (int i = 0; i < numberNodes; i++) {
-				channels[i] = numberOfChannels - 1 - i;
+				channels[i] = i;
 			}
 		}
 

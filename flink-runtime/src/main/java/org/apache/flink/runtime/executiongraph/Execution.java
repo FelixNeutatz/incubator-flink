@@ -24,10 +24,7 @@ import org.apache.flink.api.common.accumulators.Accumulator;
 import org.apache.flink.runtime.JobException;
 import org.apache.flink.runtime.accumulators.AccumulatorRegistry;
 import org.apache.flink.runtime.accumulators.StringifiedAccumulatorResult;
-import org.apache.flink.runtime.deployment.InputChannelDeploymentDescriptor;
-import org.apache.flink.runtime.deployment.PartialInputChannelDeploymentDescriptor;
-import org.apache.flink.runtime.deployment.ResultPartitionLocation;
-import org.apache.flink.runtime.deployment.TaskDeploymentDescriptor;
+import org.apache.flink.runtime.deployment.*;
 import org.apache.flink.runtime.execution.ExecutionState;
 import org.apache.flink.runtime.instance.Instance;
 import org.apache.flink.runtime.instance.InstanceConnectionInfo;
@@ -378,12 +375,16 @@ public class Execution implements Serializable {
 				operatorKvState,
 				recoveryTimestamp,
 				attemptNumber);
-
+			
 			// register this execution at the execution graph, to receive call backs
 			vertex.getExecutionGraph().registerExecution(this);
 
 			final Instance instance = slot.getInstance();
 			final ActorGateway gateway = instance.getActorGateway();
+
+			for (InputGateDeploymentDescriptor gate: deployment.getInputGates()) {
+				System.err.println("Execution.java: "+ "actor: " + gateway.path() + " vertex: " + vertex.getParallelSubtaskIndex() + " gate: " + gate.getConsumedSubpartitionIndex());
+			}
 
 			final Future<Object> deployAction = gateway.ask(new SubmitTask(deployment), timeout);
 
@@ -536,6 +537,8 @@ public class Execution implements Serializable {
 
 				consumerVertex.cachePartitionInfo(PartialInputChannelDeploymentDescriptor.fromEdge(
 						partition, partitionExecution));
+				
+				//here
 
 				// When deploying a consuming task, its task deployment descriptor will contain all
 				// deployment information available at the respective time. It is possible that some

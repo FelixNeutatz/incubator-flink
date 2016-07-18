@@ -27,10 +27,13 @@ import java.util.Set;
 import org.apache.flink.api.common.functions.BroadcastVariableInitializer;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.common.typeutils.TypeSerializerFactory;
+import org.apache.flink.runtime.io.network.api.reader.AbstractReader;
 import org.apache.flink.runtime.io.network.api.reader.MutableReader;
+import org.apache.flink.runtime.io.network.partition.consumer.SingleInputGate;
 import org.apache.flink.runtime.operators.BatchTask;
 import org.apache.flink.runtime.operators.util.ReaderIterator;
 import org.apache.flink.runtime.plugable.DeserializationDelegate;
+import org.apache.flink.runtime.taskmanager.RuntimeEnvironment;
 import org.apache.flink.util.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,9 +70,15 @@ public class BroadcastVariableMaterialization<T, C> {
 	public void materializeVariable(MutableReader<?> reader, TypeSerializerFactory<?> serializerFactory, BatchTask<?, ?> referenceHolder)
 			throws MaterializationExpiredException, IOException
 	{
+		final boolean materializer;
+		
 		Preconditions.checkNotNull(reader);
 		Preconditions.checkNotNull(serializerFactory);
 		Preconditions.checkNotNull(referenceHolder);
+
+		int saveInputIndex = -1;
+
+		System.err.println("taskmanager: " + ((RuntimeEnvironment)referenceHolder.getEnvironment()).containingTask.taskManager.path() + " start:" + ((SingleInputGate)((AbstractReader)reader).inputGate).consumedSubpartitionIndex);
 		
 		// hold the reference lock only while we track references and decide who should be the materializer
 		// that way, other tasks can de-register (in case of failure) while materialization is happening
@@ -85,50 +94,71 @@ public class BroadcastVariableMaterialization<T, C> {
 								referenceHolder.getEnvironment().getTaskInfo().getTaskNameWithSubtasks(),
 								key.toString()));
 			}
+
+			materializer = references.size() == 1;
 		}
 
 		try {
-			@SuppressWarnings("unchecked")
-			final MutableReader<DeserializationDelegate<T>> typedReader = (MutableReader<DeserializationDelegate<T>>) reader;
-			
-			@SuppressWarnings("unchecked")
-			final TypeSerializer<T> serializer = ((TypeSerializerFactory<T>) serializerFactory).getSerializer();
-
-			final ReaderIterator<T> readerIterator = new ReaderIterator<T>(typedReader, serializer);
-			
 			// first one, so we need to materialize;
 			if (LOG.isDebugEnabled()) {
 				LOG.debug("Getting Broadcast Variable (" + key + ") - Try to materialize.");
 			}
 
-			ArrayList<T> data = new ArrayList<T>();
+			if (materializer && !this.materialized && data == null ) {
+				saveInputIndex = ((SingleInputGate) ((AbstractReader) reader).inputGate).consumedSubpartitionIndex;
 
-			T element;
-			while ((element = readerIterator.next()) != null) {
-				data.add(element);
-			}
-			
-			if (!data.isEmpty()) {
+				int taskID = Integer.parseInt(((RuntimeEnvironment) referenceHolder.getEnvironment()).containingTask.taskManager.path().replaceAll("\\D+",""));
+
+				((SingleInputGate) ((AbstractReader) reader).inputGate).consumedSubpartitionIndex = taskID - 1;
+
+				@SuppressWarnings("unchecked")
+				MutableReader<DeserializationDelegate<T>> typedReader = (MutableReader<DeserializationDelegate<T>>) reader;
+
+				@SuppressWarnings("unchecked")
+				final TypeSerializer<T> serializer = ((TypeSerializerFactory<T>) serializerFactory).getSerializer();
+
+				final ReaderIterator<T> readerIterator = new ReaderIterator<T>(typedReader, serializer);
+
+				System.err.println("taskmanager: " + ((RuntimeEnvironment) referenceHolder.getEnvironment()).containingTask.taskManager.path() + " starting materialized:" + ((SingleInputGate) ((AbstractReader) reader).inputGate).consumedSubpartitionIndex);
+
 				synchronized (materializationMonitor) {
-					this.data = data;
-					this.materialized = true;
-					materializationMonitor.notifyAll();
+					try {
+						ArrayList<T> data = new ArrayList<T>();
+
+						T element;
+						while ((element = readerIterator.next()) != null) {
+							data.add(element);
+						}
+
+						this.data = data;
+						this.materialized = true;
+						materializationMonitor.notifyAll();
+						System.err.println("taskmanager: " + ((RuntimeEnvironment) referenceHolder.getEnvironment()).containingTask.taskManager.path() + " materialized:" + ((SingleInputGate) ((AbstractReader) reader).inputGate).consumedSubpartitionIndex + "size: " + data.size());
+					}catch (Exception e) {
+						System.err.println("hallo");
+					}
 				}
-				
+
 				if (LOG.isDebugEnabled()) {
 					LOG.debug("Materialization of Broadcast Variable (" + key + ") finished.");
 				}
-			}
-			else {
-				if (LOG.isDebugEnabled()) {
-					LOG.debug("Getting Broadcast Variable (" + key + ") - shared access.");
-				}
-
-				synchronized (materializationMonitor) {
-					while (!this.materialized && !disposed) {
-						materializationMonitor.wait();
+				((SingleInputGate) ((AbstractReader) reader).inputGate).consumedSubpartitionIndex = saveInputIndex;
+			} else {
+					if (LOG.isDebugEnabled()) {
+						LOG.debug("Getting Broadcast Variable (" + key + ") - shared access.");
 					}
-				}
+
+					System.err.println("taskmanager: " + ((RuntimeEnvironment) referenceHolder.getEnvironment()).containingTask.taskManager.path() + " start waiting:" + ((SingleInputGate) ((AbstractReader) reader).inputGate).consumedSubpartitionIndex);
+					
+
+					synchronized (materializationMonitor) {
+						while (!this.materialized && !disposed) {
+							materializationMonitor.wait();
+						}
+					}
+
+					System.err.println("taskmanager: " + ((RuntimeEnvironment) referenceHolder.getEnvironment()).containingTask.taskManager.path() + " done waiting:" + ((SingleInputGate) ((AbstractReader) reader).inputGate).consumedSubpartitionIndex);
+					
 			}
 		}
 		catch (Throwable t) {

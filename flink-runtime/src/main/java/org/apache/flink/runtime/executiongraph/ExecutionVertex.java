@@ -83,7 +83,7 @@ public class ExecutionVertex implements Serializable {
 
 	private Map<IntermediateResultPartitionID, IntermediateResultPartition> resultPartitions;
 
-	private ExecutionEdge[][] inputEdges;
+	public ExecutionEdge[][] inputEdges;
 
 	private final int subTaskIndex;
 
@@ -664,6 +664,8 @@ public class ExecutionVertex implements Serializable {
 
 			IntermediateDataSetID resultId = edges[0].getSource().getIntermediateResult().getId();
 
+			System.err.println("ExecutionVertex.java: subTask: "+ subTaskIndex + " numConsumerEdges:" + numConsumerEdges + " queueToRequest: " + queueToRequest);
+			
 			consumedPartitions.add(new InputGateDeploymentDescriptor(resultId, queueToRequest, partitions));
 		}
 

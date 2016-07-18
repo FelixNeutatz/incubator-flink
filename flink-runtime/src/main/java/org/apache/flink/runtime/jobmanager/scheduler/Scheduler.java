@@ -37,6 +37,7 @@ import akka.dispatch.Futures;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 
+import org.apache.flink.runtime.executiongraph.ExecutionEdge;
 import org.apache.flink.runtime.instance.SlotSharingGroupAssignment;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.instance.SharedSlot;
@@ -162,6 +163,12 @@ public class Scheduler implements InstanceListener, SlotAvailabilityListener {
 		}
 
 		final ExecutionVertex vertex = task.getTaskToExecute().getVertex();
+
+		for (ExecutionEdge[] edges : vertex.inputEdges) {
+			int subTaskIndex = vertex.getParallelSubtaskIndex();
+			int numConsumerEdges = vertex.getInputEdges(0)[0].getSource().getConsumers().get(0).size();
+			System.err.println("scheduler: " + "subTaskIndex" + subTaskIndex % numConsumerEdges);
+		}
 		
 		final Iterable<Instance> preferredLocations = vertex.getPreferredLocations();
 		final boolean forceExternalLocation = vertex.isScheduleLocalOnly() &&
@@ -300,6 +307,12 @@ public class Scheduler implements InstanceListener, SlotAvailabilityListener {
 					ExceptionUtils.rethrow(t, "An error occurred while allocating a slot in a sharing group");
 				}
 
+				for (ExecutionEdge[] edges : vertex.inputEdges) {
+					int subTaskIndex = vertex.getParallelSubtaskIndex();
+					int numConsumerEdges = vertex.getInputEdges(0)[0].getSource().getConsumers().get(0).size();
+					System.err.println("scheduler: " + "subTaskIndex" + subTaskIndex % numConsumerEdges);
+				}
+
 				return toUse;
 			}
 			else {
@@ -309,6 +322,13 @@ public class Scheduler implements InstanceListener, SlotAvailabilityListener {
 				SimpleSlot slot = getFreeSlotForTask(vertex, preferredLocations, forceExternalLocation);
 				if (slot != null) {
 					updateLocalityCounters(slot, vertex);
+
+					for (ExecutionEdge[] edges : vertex.inputEdges) {
+						int subTaskIndex = vertex.getParallelSubtaskIndex();
+						int numConsumerEdges = vertex.getInputEdges(0)[0].getSource().getConsumers().get(0).size();
+						System.err.println("scheduler: " + "subTaskIndex" + subTaskIndex % numConsumerEdges);
+					}
+					
 					return slot;
 				}
 				else {
@@ -316,6 +336,13 @@ public class Scheduler implements InstanceListener, SlotAvailabilityListener {
 					if (queueIfNoResource) {
 						SlotAllocationFuture future = new SlotAllocationFuture();
 						this.taskQueue.add(new QueuedTask(task, future));
+
+						for (ExecutionEdge[] edges : vertex.inputEdges) {
+							int subTaskIndex = vertex.getParallelSubtaskIndex();
+							int numConsumerEdges = vertex.getInputEdges(0)[0].getSource().getConsumers().get(0).size();
+							System.err.println("scheduler: " + "subTaskIndex" + subTaskIndex % numConsumerEdges);
+						}
+						
 						return future;
 					}
 					else if (forceExternalLocation) {

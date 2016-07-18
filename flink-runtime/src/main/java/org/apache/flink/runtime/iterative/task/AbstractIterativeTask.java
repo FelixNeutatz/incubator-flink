@@ -257,6 +257,7 @@ public abstract class AbstractIterativeTask<S extends Function, OT> extends Batc
 		for (int inputNum : this.iterativeBroadcastInputs) {
 			MutableReader<?> reader = this.broadcastInputReaders[inputNum];
 
+			/*
 			if (!reader.isFinished()) {
 				
 				// sanity check that the BC input is at the end of the superstep
@@ -265,7 +266,7 @@ public abstract class AbstractIterativeTask<S extends Function, OT> extends Batc
 				}
 				
 				reader.startNextSuperstep();
-			}
+			}*/
 		}
 	}
 

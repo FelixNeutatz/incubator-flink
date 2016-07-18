@@ -1348,6 +1348,10 @@ class JobManager(
             // the job.
             log.info(s"Scheduling job $jobId ($jobName).")
 
+            System.err.println("starting scheduling");
+            
+            
+            
             executionGraph.scheduleForExecution(scheduler)
           } else {
             // Remove the job graph. Otherwise it will be lingering around and possibly removed from
