@@ -81,6 +81,22 @@ public class BroadcastVariableManager {
 		BroadcastVariableKey key = new BroadcastVariableKey(referenceHolder.getEnvironment().getJobVertexId(), name, superstep);
 		releaseReference(key, referenceHolder);
 	}
+
+	public void releaseReference1(String name, int superstep, BatchTask<?, ?> referenceHolder) {
+		BroadcastVariableKey key = new BroadcastVariableKey(referenceHolder.getEnvironment().getJobVertexId(), name, superstep);
+		releaseReference1(key, referenceHolder,superstep);
+	}
+
+	public void releaseReference1(BroadcastVariableKey key, BatchTask<?, ?> referenceHolder, int superstep) {
+		BroadcastVariableMaterialization<?, ?> mat = variables.get(key);
+
+		// release this reference
+		/*
+		if (mat.decrementReference(referenceHolder)) {
+			// remove if no one holds a reference and no one concurrently replaced the entry
+			variables.remove(key, mat);
+		}*/
+	}
 	
 	public void releaseReference(BroadcastVariableKey key, BatchTask<?, ?> referenceHolder) {
 		BroadcastVariableMaterialization<?, ?> mat = variables.get(key);

@@ -36,6 +36,7 @@ import org.apache.flink.runtime.broadcast.BroadcastVariableMaterialization;
 import org.apache.flink.runtime.execution.CancelTaskException;
 import org.apache.flink.runtime.execution.Environment;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
+import org.apache.flink.runtime.io.network.api.reader.AbstractReader;
 import org.apache.flink.runtime.io.network.api.reader.MutableReader;
 import org.apache.flink.runtime.io.network.api.reader.MutableRecordReader;
 import org.apache.flink.runtime.io.network.api.writer.ChannelSelector;
@@ -428,6 +429,7 @@ public class BatchTask<S extends Function, OT> extends AbstractInvokable impleme
 
 		BroadcastVariableMaterialization<X, ?> variable = getEnvironment().getBroadcastVariableManager().materializeBroadcastVariable(bcVarName, superstep, this, reader, serializerFactory);
 		context.setBroadcastVariable(bcVarName, variable);
+		this.broadcastInputReaders[inputNum] = variable.getReader();
 	}
 	
 	protected void releaseBroadcastVariables(String bcVarName, int superstep, DistributedRuntimeUDFContext context) {
@@ -436,7 +438,7 @@ public class BatchTask<S extends Function, OT> extends AbstractInvokable impleme
 				(superstep > 1 ? ", superstep " + superstep : "")));
 		}
 		
-		getEnvironment().getBroadcastVariableManager().releaseReference(bcVarName, superstep, this);
+		getEnvironment().getBroadcastVariableManager().releaseReference1(bcVarName, superstep, this);
 		context.clearBroadcastVariable(bcVarName);
 	}
 	

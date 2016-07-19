@@ -172,7 +172,7 @@ public class Task implements Runnable {
 	private final Map<IntermediateDataSetID, SingleInputGate> inputGatesById;
 
 	/** Gateway to the TaskManager that spawned this task */
-	private final ActorGateway taskManager;
+	public final ActorGateway taskManager;
 
 	/** Gateway to the JobManager */
 	private final ActorGateway jobManager;

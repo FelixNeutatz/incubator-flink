@@ -78,7 +78,7 @@ public class RuntimeEnvironment implements Environment {
 	private final TaskManagerRuntimeInfo taskManagerInfo;
 	private final TaskMetricGroup metrics;
 
-	private final Task containingTask;
+	public final Task containingTask;
 
 	// ------------------------------------------------------------------------
 

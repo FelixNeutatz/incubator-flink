@@ -45,6 +45,7 @@ public class SuperstepKickoffLatch {
 	
 	public boolean awaitStartOfSuperstepOrTermination(int superstep) throws InterruptedException {
 		while (true) {
+			System.err.println("hallo");
 			synchronized (monitor) {
 				if (terminated) {
 					return true;
