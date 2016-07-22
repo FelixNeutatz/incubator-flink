@@ -427,6 +427,7 @@ public class BatchTask<S extends Function, OT> extends AbstractInvokable impleme
 		final MutableReader<?> reader = this.broadcastInputReaders[inputNum];
 
 		BroadcastVariableMaterialization<X, ?> variable = getEnvironment().getBroadcastVariableManager().materializeBroadcastVariable(bcVarName, superstep, this, reader, serializerFactory);
+		this.broadcastInputReaders[inputNum] = variable.getReader(); 
 		context.setBroadcastVariable(bcVarName, variable);
 	}
 	

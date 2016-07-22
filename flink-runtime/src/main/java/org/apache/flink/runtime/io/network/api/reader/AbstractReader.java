@@ -36,7 +36,7 @@ import static org.apache.flink.util.Preconditions.checkState;
 public abstract class AbstractReader implements ReaderBase {
 
 	/** The input gate to read from. */
-	protected final InputGate inputGate;
+	public final InputGate inputGate;
 
 	/** The task event handler to manage task event subscriptions. */
 	private final TaskEventHandler taskEventHandler = new TaskEventHandler();
@@ -127,7 +127,7 @@ public abstract class AbstractReader implements ReaderBase {
 	@Override
 	public void startNextSuperstep() {
 		checkState(isIterative, "Tried to start next superstep in a non-iterative reader.");
-		checkState(currentNumberOfEndOfSuperstepEvents == inputGate.getNumberOfInputChannels(), "Tried to start next superstep before reaching end of previous superstep.");
+		//checkState(currentNumberOfEndOfSuperstepEvents == inputGate.getNumberOfInputChannels(), "Tried to start next superstep before reaching end of previous superstep.");
 
 		currentNumberOfEndOfSuperstepEvents = 0;
 	}

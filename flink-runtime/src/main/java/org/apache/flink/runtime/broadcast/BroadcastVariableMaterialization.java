@@ -27,7 +27,9 @@ import java.util.Set;
 import org.apache.flink.api.common.functions.BroadcastVariableInitializer;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.common.typeutils.TypeSerializerFactory;
+import org.apache.flink.runtime.io.network.api.reader.AbstractReader;
 import org.apache.flink.runtime.io.network.api.reader.MutableReader;
+import org.apache.flink.runtime.io.network.partition.consumer.SingleInputGate;
 import org.apache.flink.runtime.operators.BatchTask;
 import org.apache.flink.runtime.operators.util.ReaderIterator;
 import org.apache.flink.runtime.plugable.DeserializationDelegate;
@@ -56,6 +58,8 @@ public class BroadcastVariableMaterialization<T, C> {
 	private boolean materialized;
 	
 	private boolean disposed;
+	
+	private MutableReader<?> reader;
 	
 	
 	public BroadcastVariableMaterialization(BroadcastVariableKey key) {
@@ -114,9 +118,12 @@ public class BroadcastVariableMaterialization<T, C> {
 				}
 				
 				synchronized (materializationMonitor) {
+					System.err.println("Writing");
 					this.data = data;
 					this.materialized = true;
+					this.reader = reader;
 					materializationMonitor.notifyAll();
+					System.err.println("Write Reader:" + ((SingleInputGate)((AbstractReader)reader).inputGate).consumedSubpartitionIndex);
 				}
 				
 				if (LOG.isDebugEnabled()) {
@@ -129,9 +136,9 @@ public class BroadcastVariableMaterialization<T, C> {
 				if (LOG.isDebugEnabled()) {
 					LOG.debug("Getting Broadcast Variable (" + key + ") - shared access.");
 				}
-				
+				/*
 				T element = serializer.createInstance();
-				while ((element = readerIterator.next(element)) != null);
+				while ((element = readerIterator.next(element)) != null);*/
 				
 				synchronized (materializationMonitor) {
 					while (!this.materialized && !disposed) {
@@ -152,7 +159,11 @@ public class BroadcastVariableMaterialization<T, C> {
 			}
 		}
 	}
-	
+
+	public MutableReader<?> getReader() {
+		return reader;
+	}
+
 	public boolean decrementReference(BatchTask<?, ?> referenceHolder) {
 		return decrementReferenceInternal(referenceHolder, true);
 	}

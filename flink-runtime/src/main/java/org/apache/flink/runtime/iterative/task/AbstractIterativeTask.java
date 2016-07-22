@@ -23,6 +23,9 @@ import org.apache.flink.api.common.TaskInfo;
 import org.apache.flink.api.common.accumulators.Accumulator;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.metrics.MetricGroup;
+import org.apache.flink.runtime.io.network.api.reader.AbstractReader;
+import org.apache.flink.runtime.io.network.api.reader.RecordReader;
+import org.apache.flink.runtime.io.network.partition.consumer.SingleInputGate;
 import org.apache.flink.runtime.operators.BatchTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -256,13 +259,16 @@ public abstract class AbstractIterativeTask<S extends Function, OT> extends Batc
 		
 		for (int inputNum : this.iterativeBroadcastInputs) {
 			MutableReader<?> reader = this.broadcastInputReaders[inputNum];
+			
+			
 
 			if (!reader.isFinished()) {
 				
 				// sanity check that the BC input is at the end of the superstep
-				if (!reader.hasReachedEndOfSuperstep()) {
+				/*if (!reader.hasReachedEndOfSuperstep()) {
+					System.err.println("error Reader:" + ((SingleInputGate)((AbstractReader)reader).inputGate).consumedSubpartitionIndex);
 					throw new IllegalStateException("An iterative broadcast input has not been fully consumed.");
-				}
+				}*/
 				
 				reader.startNextSuperstep();
 			}

@@ -124,7 +124,7 @@ public class SingleInputGate implements InputGate {
 	 * The index of the consumed subpartition of each consumed partition. This index depends on the
 	 * {@link DistributionPattern} and the subtask indices of the producing and consuming task.
 	 */
-	private final int consumedSubpartitionIndex;
+	public final int consumedSubpartitionIndex;
 
 	/** The number of input channels (equivalent to the number of consumed partitions). */
 	private final int numberOfInputChannels;
