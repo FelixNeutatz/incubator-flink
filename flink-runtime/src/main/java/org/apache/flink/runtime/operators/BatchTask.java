@@ -438,7 +438,7 @@ public class BatchTask<S extends Function, OT> extends AbstractInvokable impleme
 				(superstep > 1 ? ", superstep " + superstep : "")));
 		}
 		
-		getEnvironment().getBroadcastVariableManager().releaseReference1(bcVarName, superstep, this);
+		getEnvironment().getBroadcastVariableManager().releaseReference(bcVarName, superstep, this);
 		context.clearBroadcastVariable(bcVarName);
 	}
 	

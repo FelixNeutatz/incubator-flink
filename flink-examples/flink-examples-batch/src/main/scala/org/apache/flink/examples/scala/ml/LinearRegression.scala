@@ -37,7 +37,7 @@ object LinearRegression {
     conf.setInteger(ConfigConstants.TASK_MANAGER_NUM_TASK_SLOTS, 2)
     conf.setString(ConfigConstants.AKKA_ASK_TIMEOUT, "2 h")
 
-    val paralel = 4
+    val paralel = 3
 
     val env = ExecutionEnvironment.createLocalEnvironment(conf)
     env.setParallelism(6)

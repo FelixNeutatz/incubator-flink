@@ -30,12 +30,19 @@ public class BroadcastVariableManager {
 	
 	private final ConcurrentHashMap<BroadcastVariableKey, BroadcastVariableMaterialization<?, ?>> variables =
 							new ConcurrentHashMap<BroadcastVariableKey, BroadcastVariableMaterialization<?, ?>>(16);
-	
+
+	private final ConcurrentHashMap<BatchTask<?, ?>, Integer> waitMap =
+		new ConcurrentHashMap<>();
+
+	private final Object materializationMonitorDE = new Object();
+
+
 	// --------------------------------------------------------------------------------------------
 	
 	public <T> BroadcastVariableMaterialization<T, ?> materializeBroadcastVariable(String name, int superstep, BatchTask<?, ?> holder,
 			MutableReader<?> reader, TypeSerializerFactory<T> serializerFactory) throws IOException
 	{
+		waitMap.put(holder,1);
 		final BroadcastVariableKey key = new BroadcastVariableKey(holder.getEnvironment().getJobVertexId(), name, superstep);
 		
 		while (true) {
@@ -82,26 +89,31 @@ public class BroadcastVariableManager {
 		releaseReference(key, referenceHolder);
 	}
 
-	public void releaseReference1(String name, int superstep, BatchTask<?, ?> referenceHolder) {
-		BroadcastVariableKey key = new BroadcastVariableKey(referenceHolder.getEnvironment().getJobVertexId(), name, superstep);
-		releaseReference1(key, referenceHolder,superstep);
-	}
-
-	public void releaseReference1(BroadcastVariableKey key, BatchTask<?, ?> referenceHolder, int superstep) {
-		BroadcastVariableMaterialization<?, ?> mat = variables.get(key);
-
-		// release this reference
-		/*
-		if (mat.decrementReference(referenceHolder)) {
-			// remove if no one holds a reference and no one concurrently replaced the entry
-			variables.remove(key, mat);
-		}*/
-	}
-	
 	public void releaseReference(BroadcastVariableKey key, BatchTask<?, ?> referenceHolder) {
 		BroadcastVariableMaterialization<?, ?> mat = variables.get(key);
+
+		System.err.println("is removal successful: " + waitMap.remove(referenceHolder));
+
+		if (waitMap.isEmpty()) {
+			System.err.println("map is empty: ");
+			synchronized (materializationMonitorDE) {
+				materializationMonitorDE.notifyAll();
+			}
+		} else {
+			synchronized (materializationMonitorDE) {
+				while (!waitMap.isEmpty()) {
+					try {
+						materializationMonitorDE.wait();
+
+					} catch (InterruptedException e) {
+						e.printStackTrace();
+					}
+				}
+			}
+		}
 		
 		// release this reference
+		
 		if (mat.decrementReference(referenceHolder)) {
 			// remove if no one holds a reference and no one concurrently replaced the entry
 			variables.remove(key, mat);

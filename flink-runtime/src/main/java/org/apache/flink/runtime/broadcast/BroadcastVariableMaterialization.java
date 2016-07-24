@@ -53,8 +53,6 @@ public class BroadcastVariableMaterialization<T, C> {
 
 	private final Object materializationMonitor = new Object();
 
-	private final Object materializationMonitorDE = new Object();
-
 	private final BroadcastVariableKey key;
 
 	private ArrayList<T> data;
@@ -233,6 +231,7 @@ public class BroadcastVariableMaterialization<T, C> {
 		return true;
 	}
 
+	/*
 	public synchronized boolean decrementReference1(BatchTask<?, ?> referenceHolder, int superstep1) {
 		//System.err.println("reference:" + referenceHolder + "superstep: " + superstep + " decrement: " + c.getAndIncrement());
 
@@ -267,7 +266,7 @@ public class BroadcastVariableMaterialization<T, C> {
 		}
 		return decrementReferenceInternal(referenceHolder, true);
 		//return true;
-	}
+	}*/
 
 	public boolean decrementReferenceIfHeld(BatchTask<?, ?> referenceHolder) {
 		return decrementReferenceInternal(referenceHolder, false);
