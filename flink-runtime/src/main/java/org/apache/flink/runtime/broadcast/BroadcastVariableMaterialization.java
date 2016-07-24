@@ -195,78 +195,8 @@ public class BroadcastVariableMaterialization<T, C> {
 	}
 
 	public boolean decrementReference(BatchTask<?, ?> referenceHolder) {
-		/*
-		try {
-			Thread.sleep(1000L);
-		} catch (InterruptedException e) {
-			e.printStackTrace();
-		}
-		//System.err.println("reference:" + referenceHolder + "superstep: " + superstep + " decrement: " + c.getAndIncrement());
-		/*
-		Integer i = currentNumberOfReleaseAttempts.get(referenceHolder.);
-		if (i == null) {
-			i = 0;
-		}
-		i++;
-		currentNumberOfReleaseAttempts.put(,i);
-		if (i >= references.size()) {
-			synchronized (materializationMonitorDE) {
-				materializationMonitorDE.notifyAll();
-				System.err.println("notify");
-			}
-		}
-		
-		System.err.println("releasing: " + currentNumberOfReleaseAttempts + " references:" + references.size() + " superstep: " + superstep);
-		synchronized (materializationMonitorDE) {
-			while (currentNumberOfReleaseAttempts.get(referenceHolder) >= references.size() && !disposed) {
-				try {
-					materializationMonitorDE.wait();
-				} catch (InterruptedException e) {
-					e.printStackTrace();
-				}
-			}
-		}
-		System.err.println("released: " + currentNumberOfReleaseAttempts);
-		return decrementReferenceInternal(referenceHolder, true);*/
-		return true;
-	}
-
-	/*
-	public synchronized boolean decrementReference1(BatchTask<?, ?> referenceHolder, int superstep1) {
-		//System.err.println("reference:" + referenceHolder + "superstep: " + superstep + " decrement: " + c.getAndIncrement());
-
-		synchronized (materializationMonitorDE) {
-			Integer i = currentNumberOfReleaseAttempts.get(superstep1);
-			if (i == null) {
-				i = 0;
-			}
-			i++;
-			currentNumberOfReleaseAttempts.put(superstep1, i);
-		}
-		if (currentNumberOfReleaseAttempts.get(superstep1) >= references.size()) {
-			synchronized (materializationMonitorDE) {
-				materializationMonitorDE.notifyAll();
-				System.err.println("taskmanger: " + ((RuntimeEnvironment)referenceHolder.getEnvironment()).containingTask.taskManager.path() +" released: " + currentNumberOfReleaseAttempts);
-			}
-		} else {
-			System.err.println("taskmanger: " + ((RuntimeEnvironment) referenceHolder.getEnvironment()).containingTask.taskManager.path() + " releasing: " + currentNumberOfReleaseAttempts + " references:" + references.size() + " superstep: " + superstep1);
-
-			synchronized (materializationMonitorDE) {
-				while (currentNumberOfReleaseAttempts.get(superstep1) >= references.size() && !disposed) {
-					try {
-						System.err.println("taskmanger: " + ((RuntimeEnvironment) referenceHolder.getEnvironment()).containingTask.taskManager.path() + " release waiting: ");
-						materializationMonitorDE.wait();
-
-					} catch (InterruptedException e) {
-						e.printStackTrace();
-					}
-				}
-			}
-			System.err.println("taskmanger: " + ((RuntimeEnvironment) referenceHolder.getEnvironment()).containingTask.taskManager.path() + " release done waiting: ");
-		}
 		return decrementReferenceInternal(referenceHolder, true);
-		//return true;
-	}*/
+	}
 
 	public boolean decrementReferenceIfHeld(BatchTask<?, ?> referenceHolder) {
 		return decrementReferenceInternal(referenceHolder, false);
