@@ -30,13 +30,29 @@ public class BroadcastVariableManager {
 	
 	private final ConcurrentHashMap<BroadcastVariableKey, BroadcastVariableMaterialization<?, ?>> variables =
 							new ConcurrentHashMap<BroadcastVariableKey, BroadcastVariableMaterialization<?, ?>>(16);
-	
+
+	private MutableReader<?> reader = null;
+
+	private final Object releaseMonitor = new Object();
+	private final ConcurrentHashMap<Integer, Integer> queue =
+		new ConcurrentHashMap<Integer, Integer>();
+
+
 	// --------------------------------------------------------------------------------------------
 	
 	public <T> BroadcastVariableMaterialization<T, ?> materializeBroadcastVariable(String name, int superstep, BatchTask<?, ?> holder,
 			MutableReader<?> reader, TypeSerializerFactory<T> serializerFactory) throws IOException
 	{
 		final BroadcastVariableKey key = new BroadcastVariableKey(holder.getEnvironment().getJobVertexId(), name, superstep);
+		
+		synchronized (releaseMonitor) {
+			Integer count = queue.get(superstep);
+			if (count == null) {
+				count = 0;
+			}
+			count++;
+			queue.put(superstep, count);
+		}
 		
 		while (true) {
 			final BroadcastVariableMaterialization<T, Object> newMat = new BroadcastVariableMaterialization<T, Object>(key);
@@ -47,7 +63,14 @@ public class BroadcastVariableManager {
 			final BroadcastVariableMaterialization<T, ?> materialization = (previous == null) ? newMat : (BroadcastVariableMaterialization<T, ?>) previous;
 			
 			try {
-				materialization.materializeVariable(reader, serializerFactory, holder);
+				if (this.reader == null) {
+					MutableReader<?> r = materialization.materializeVariable(reader, serializerFactory, holder);
+					if (r != null) {
+						this.reader = r;
+					}
+				} else {
+					materialization.materializeVariable(this.reader, serializerFactory, holder);
+				}
 				return materialization;
 			}
 			catch (MaterializationExpiredException e) {
@@ -63,7 +86,14 @@ public class BroadcastVariableManager {
 				
 				if (replaceSuccessful) {
 					try {
-						newMat.materializeVariable(reader, serializerFactory, holder);
+						if (this.reader == null) {
+							MutableReader<?> r = newMat.materializeVariable(reader, serializerFactory, holder);
+							if (r != null) {
+								this.reader = r;
+							}
+						} else {
+							newMat.materializeVariable(this.reader, serializerFactory, holder);
+						}
 						return newMat;
 					}
 					catch (MaterializationExpiredException ee) {
@@ -76,13 +106,32 @@ public class BroadcastVariableManager {
 		}
 	}
 	
-	
 	public void releaseReference(String name, int superstep, BatchTask<?, ?> referenceHolder) {
+		synchronized (releaseMonitor) {
+			Integer count = queue.get(superstep);
+			if (count != null) {
+				queue.put(superstep, count - 1);
+			} 
+			if (count == 1) {
+				releaseMonitor.notifyAll();
+			}
+		}
+
+		synchronized (releaseMonitor) {
+			while (queue.get(superstep) != 0) {
+				try {
+					releaseMonitor.wait();
+				} catch (InterruptedException e) {
+					e.printStackTrace();
+				}
+			}
+		}
+
 		BroadcastVariableKey key = new BroadcastVariableKey(referenceHolder.getEnvironment().getJobVertexId(), name, superstep);
 		releaseReference(key, referenceHolder);
 	}
 	
-	public void releaseReference(BroadcastVariableKey key, BatchTask<?, ?> referenceHolder) {
+	private void releaseReference(BroadcastVariableKey key, BatchTask<?, ?> referenceHolder) {
 		BroadcastVariableMaterialization<?, ?> mat = variables.get(key);
 		
 		// release this reference

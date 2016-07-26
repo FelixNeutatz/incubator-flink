@@ -27,6 +27,7 @@ import java.util.Set;
 import org.apache.flink.api.common.functions.BroadcastVariableInitializer;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.common.typeutils.TypeSerializerFactory;
+import org.apache.flink.runtime.io.network.api.reader.AbstractReader;
 import org.apache.flink.runtime.io.network.api.reader.MutableReader;
 import org.apache.flink.runtime.operators.BatchTask;
 import org.apache.flink.runtime.operators.util.ReaderIterator;
@@ -64,7 +65,7 @@ public class BroadcastVariableMaterialization<T, C> {
 
 	// --------------------------------------------------------------------------------------------
 	
-	public void materializeVariable(MutableReader<?> reader, TypeSerializerFactory<?> serializerFactory, BatchTask<?, ?> referenceHolder)
+	public MutableReader<?> materializeVariable(MutableReader<?> reader, TypeSerializerFactory<?> serializerFactory, BatchTask<?, ?> referenceHolder)
 			throws MaterializationExpiredException, IOException
 	{
 		Preconditions.checkNotNull(reader);
@@ -92,15 +93,18 @@ public class BroadcastVariableMaterialization<T, C> {
 		}
 
 		try {
-			@SuppressWarnings("unchecked")
-			final MutableReader<DeserializationDelegate<T>> typedReader = (MutableReader<DeserializationDelegate<T>>) reader;
-			
-			@SuppressWarnings("unchecked")
-			final TypeSerializer<T> serializer = ((TypeSerializerFactory<T>) serializerFactory).getSerializer();
-
-			final ReaderIterator<T> readerIterator = new ReaderIterator<T>(typedReader, serializer);
-			
 			if (materializer) {
+				((AbstractReader)reader).currentNumberOfEndOfSuperstepEvents = 0;
+				
+				@SuppressWarnings("unchecked")
+				final MutableReader<DeserializationDelegate<T>> typedReader = (MutableReader<DeserializationDelegate<T>>) reader;
+			
+				@SuppressWarnings("unchecked")
+				final TypeSerializer<T> serializer = ((TypeSerializerFactory<T>) serializerFactory).getSerializer();
+	
+				final ReaderIterator<T> readerIterator = new ReaderIterator<T>(typedReader, serializer);
+			
+			
 				// first one, so we need to materialize;
 				if (LOG.isDebugEnabled()) {
 					LOG.debug("Getting Broadcast Variable (" + key + ") - First access, materializing.");
@@ -117,10 +121,7 @@ public class BroadcastVariableMaterialization<T, C> {
 					this.data = data;
 					this.materialized = true;
 					materializationMonitor.notifyAll();
-				}
-				
-				if (LOG.isDebugEnabled()) {
-					LOG.debug("Materialization of Broadcast Variable (" + key + ") finished.");
+					return reader;
 				}
 			}
 			else {
@@ -130,16 +131,18 @@ public class BroadcastVariableMaterialization<T, C> {
 					LOG.debug("Getting Broadcast Variable (" + key + ") - shared access.");
 				}
 				
+				/*
 				T element = serializer.createInstance();
 				while ((element = readerIterator.next(element)) != null);
+				*/
 				
 				synchronized (materializationMonitor) {
 					while (!this.materialized && !disposed) {
 						materializationMonitor.wait();
 					}
 				}
-				
 			}
+			return null;
 		}
 		catch (Throwable t) {
 			// in case of an exception, we need to clean up big time

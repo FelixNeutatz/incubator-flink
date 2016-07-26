@@ -145,11 +145,15 @@ public abstract class AbstractIterativeTask<S extends Function, OT> extends Batc
 		// call the parent to execute the superstep
 		super.run();
 		
+		
+		/*
+		//If I remove this it will work until the 170th iteration
+		//If I don't remove, only the first couple of iterations work
 		// release the iterative broadcast variables
 		for (int i : this.iterativeBroadcastInputs) {
 			final String name = getTaskConfig().getBroadcastInputName(i);
 			releaseBroadcastVariables(name, superstepNum, this.runtimeUdfContext);
-		}
+		}*/
 	}
 
 	@Override
@@ -254,6 +258,7 @@ public abstract class AbstractIterativeTask<S extends Function, OT> extends Batc
 			}
 		}
 		
+		/*
 		for (int inputNum : this.iterativeBroadcastInputs) {
 			MutableReader<?> reader = this.broadcastInputReaders[inputNum];
 
@@ -266,7 +271,7 @@ public abstract class AbstractIterativeTask<S extends Function, OT> extends Batc
 				
 				reader.startNextSuperstep();
 			}
-		}
+		}*/
 	}
 
 	@Override

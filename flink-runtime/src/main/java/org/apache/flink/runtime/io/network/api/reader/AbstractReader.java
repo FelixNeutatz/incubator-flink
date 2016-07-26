@@ -36,7 +36,7 @@ import static org.apache.flink.util.Preconditions.checkState;
 public abstract class AbstractReader implements ReaderBase {
 
 	/** The input gate to read from. */
-	protected final InputGate inputGate;
+	public final InputGate inputGate;
 
 	/** The task event handler to manage task event subscriptions. */
 	private final TaskEventHandler taskEventHandler = new TaskEventHandler();
@@ -48,7 +48,7 @@ public abstract class AbstractReader implements ReaderBase {
 	 * The current number of end of superstep events (reset for each superstep). A superstep is
 	 * finished after an end of superstep event has been received for each input channel.
 	 */
-	private int currentNumberOfEndOfSuperstepEvents;
+	public int currentNumberOfEndOfSuperstepEvents;
 
 	protected AbstractReader(InputGate inputGate) {
 		this.inputGate = inputGate;
