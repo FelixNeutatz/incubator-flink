@@ -26,7 +26,7 @@ import java.util.List;
 
 public class IntermediateResultPartition {
 
-	private final IntermediateResult totalResult;
+	public IntermediateResult totalResult;
 
 	private final ExecutionVertex producer;
 

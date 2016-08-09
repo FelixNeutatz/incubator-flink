@@ -27,7 +27,9 @@ import java.util.Set;
 import org.apache.flink.api.common.functions.BroadcastVariableInitializer;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.common.typeutils.TypeSerializerFactory;
+import org.apache.flink.runtime.io.network.api.reader.AbstractReader;
 import org.apache.flink.runtime.io.network.api.reader.MutableReader;
+import org.apache.flink.runtime.io.network.partition.consumer.SingleInputGate;
 import org.apache.flink.runtime.operators.BatchTask;
 import org.apache.flink.runtime.operators.util.ReaderIterator;
 import org.apache.flink.runtime.plugable.DeserializationDelegate;
@@ -92,6 +94,8 @@ public class BroadcastVariableMaterialization<T, C> {
 		}
 
 		try {
+			((SingleInputGate)((AbstractReader)reader).inputGate).consumedSubpartitionIndex = 0;
+			
 			@SuppressWarnings("unchecked")
 			final MutableReader<DeserializationDelegate<T>> typedReader = (MutableReader<DeserializationDelegate<T>>) reader;
 			
@@ -113,6 +117,15 @@ public class BroadcastVariableMaterialization<T, C> {
 					data.add(element);
 				}
 				
+				/*
+				System.err.print("data: " + data.size() + " ");
+				
+				for (T e: data){
+					System.err.print(e + ", ");
+				}
+				System.err.println("");
+				*/
+				
 				synchronized (materializationMonitor) {
 					this.data = data;
 					this.materialized = true;
@@ -130,8 +143,10 @@ public class BroadcastVariableMaterialization<T, C> {
 					LOG.debug("Getting Broadcast Variable (" + key + ") - shared access.");
 				}
 				
+				/*
 				T element = serializer.createInstance();
 				while ((element = readerIterator.next(element)) != null);
+				*/
 				
 				synchronized (materializationMonitor) {
 					while (!this.materialized && !disposed) {

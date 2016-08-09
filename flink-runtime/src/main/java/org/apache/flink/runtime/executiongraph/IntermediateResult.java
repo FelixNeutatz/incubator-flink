@@ -44,7 +44,7 @@ public class IntermediateResult {
 
 	private final int connectionIndex;
 
-	private final ResultPartitionType resultType;
+	public ResultPartitionType resultType;
 
 	private final boolean eagerlyDeployConsumers;
 

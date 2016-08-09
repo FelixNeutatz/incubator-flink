@@ -254,6 +254,7 @@ public abstract class AbstractIterativeTask<S extends Function, OT> extends Batc
 			}
 		}
 		
+		
 		for (int inputNum : this.iterativeBroadcastInputs) {
 			MutableReader<?> reader = this.broadcastInputReaders[inputNum];
 

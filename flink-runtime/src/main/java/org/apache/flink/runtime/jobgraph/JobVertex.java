@@ -343,7 +343,7 @@ public class JobVertex implements java.io.Serializable {
 	public IntermediateDataSet createAndAddResultDataSet(
 			IntermediateDataSetID id,
 			ResultPartitionType partitionType) {
-
+		System.err.println("subpartition: " + this.getName() + "type: " + partitionType + "broadcast:");
 		IntermediateDataSet result = new IntermediateDataSet(id, partitionType, this);
 		this.results.add(result);
 		return result;
@@ -374,6 +374,12 @@ public class JobVertex implements java.io.Serializable {
 			ResultPartitionType partitionType,
 			boolean eagerlyDeployConsumers) {
 
+		if (distPattern == DistributionPattern.ALL_TO_ALL){
+			System.err.println("changed to blocking");
+			System.err.println("subpartition: " + input.getName() + "type: " + partitionType + "broadcast:" + "here");
+			partitionType = ResultPartitionType.BLOCKING;
+		}
+		
 		IntermediateDataSet dataSet = input.createAndAddResultDataSet(partitionType);
 		dataSet.setEagerlyDeployConsumers(eagerlyDeployConsumers);
 

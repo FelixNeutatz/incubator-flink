@@ -32,6 +32,7 @@ import org.apache.flink.runtime.instance.InstanceConnectionInfo;
 import org.apache.flink.runtime.instance.ActorGateway;
 import org.apache.flink.runtime.instance.SimpleSlot;
 import org.apache.flink.runtime.io.network.partition.ResultPartitionID;
+import org.apache.flink.runtime.io.network.partition.ResultPartitionType;
 import org.apache.flink.runtime.jobgraph.DistributionPattern;
 import org.apache.flink.runtime.jobgraph.IntermediateDataSetID;
 import org.apache.flink.runtime.jobgraph.IntermediateResultPartitionID;
@@ -644,7 +645,13 @@ public class ExecutionVertex implements Serializable {
 		List<ResultPartitionDeploymentDescriptor> producedPartitions = new ArrayList<ResultPartitionDeploymentDescriptor>(resultPartitions.size());
 
 		for (IntermediateResultPartition partition : resultPartitions.values()) {
+			
+			/*
+			if (this.getSimpleName().contains("Generate broadcast vector")) {
+				partition.totalResult.resultType = ResultPartitionType.BLOCKING;
+			}*/
 			producedPartitions.add(ResultPartitionDeploymentDescriptor.from(partition));
+			System.err.println("taskname: " + this.getSimpleName() + "is broadcasting:" + this.getJobVertex() + " blocking: " + partition.getResultType());
 		}
 
 		// Consumed intermediate results
