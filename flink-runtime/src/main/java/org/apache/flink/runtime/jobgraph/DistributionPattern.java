@@ -38,5 +38,7 @@ public enum DistributionPattern {
 	 * <p>
 	 * {@link ExecutionVertex#connectPointwise(org.apache.flink.runtime.executiongraph.IntermediateResultPartition[], int)}
 	 */
-	POINTWISE
+	POINTWISE,
+	
+	BROADCAST
 }

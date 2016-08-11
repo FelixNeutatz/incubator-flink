@@ -374,7 +374,7 @@ public class JobVertex implements java.io.Serializable {
 			ResultPartitionType partitionType,
 			boolean eagerlyDeployConsumers) {
 
-		if (distPattern == DistributionPattern.ALL_TO_ALL){
+		if (distPattern == DistributionPattern.BROADCAST){
 			System.err.println("changed to blocking");
 			System.err.println("subpartition: " + input.getName() + "type: " + partitionType + "broadcast:" + "here");
 			partitionType = ResultPartitionType.BLOCKING;
