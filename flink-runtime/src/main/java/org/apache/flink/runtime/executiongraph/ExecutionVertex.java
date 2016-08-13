@@ -264,8 +264,12 @@ public class ExecutionVertex implements Serializable {
 				edges = connectAllToAll(sourcePartitions, inputNumber);
 				break;
 
+			case BROADCAST:
+				edges = connectAllToAll(sourcePartitions, inputNumber);
+				break;
+
 			default:
-				throw new RuntimeException("Unrecognized distribution pattern.");
+ 				throw new RuntimeException("Unrecognized distribution pattern.");
 
 		}
 
