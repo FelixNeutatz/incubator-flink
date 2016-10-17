@@ -94,6 +94,7 @@ public class BroadcastVariableMaterialization<T, C> {
 		}
 
 		try {
+			int actualConsumedSubpartitionIndex = ((SingleInputGate)((AbstractReader)reader).inputGate).consumedSubpartitionIndex;
 			((SingleInputGate)((AbstractReader)reader).inputGate).consumedSubpartitionIndex = 0;
 			
 			@SuppressWarnings("unchecked")
@@ -153,8 +154,8 @@ public class BroadcastVariableMaterialization<T, C> {
 						materializationMonitor.wait();
 					}
 				}
-				
 			}
+			((SingleInputGate)((AbstractReader)reader).inputGate).consumedSubpartitionIndex = actualConsumedSubpartitionIndex;
 		}
 		catch (Throwable t) {
 			// in case of an exception, we need to clean up big time
