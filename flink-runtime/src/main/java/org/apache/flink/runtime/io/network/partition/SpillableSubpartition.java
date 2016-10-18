@@ -62,13 +62,15 @@ class SpillableSubpartition extends ResultSubpartition {
 	private volatile boolean isReleased;
 
 	/** The read view to consume this subpartition. */
-	private ResultSubpartitionView readView;
+	private ArrayList<ResultSubpartitionView> readViews;
 
 	SpillableSubpartition(int index, ResultPartition parent, IOManager ioManager, IOMode ioMode) {
 		super(index, parent);
 
 		this.ioManager = checkNotNull(ioManager);
 		this.ioMode = checkNotNull(ioMode);
+		
+		this.readViews = new ArrayList<ResultSubpartitionView>();
 	}
 
 	@Override
@@ -110,7 +112,7 @@ class SpillableSubpartition extends ResultSubpartition {
 
 	@Override
 	public void release() throws IOException {
-		final ResultSubpartitionView view;
+		//final ResultSubpartitionView view;
 
 		synchronized (buffers) {
 			if (isReleased) {
@@ -131,15 +133,19 @@ class SpillableSubpartition extends ResultSubpartition {
 			}
 
 			// Get the view...
+			/*
 			view = readView;
 			readView = null;
+			*/
 
 			isReleased = true;
 		}
 
-		// Release the view outside of the synchronized block
-		if (view != null) {
-			view.notifySubpartitionConsumed();
+		for (final ResultSubpartitionView view: readViews) {
+			// Release the view outside of the synchronized block
+			if (view != null) {
+				view.notifySubpartitionConsumed();
+			}
 		}
 	}
 
@@ -185,6 +191,7 @@ class SpillableSubpartition extends ResultSubpartition {
 						"been finished.");
 			}
 
+			ResultSubpartitionView readView = null;
 			/*
 			if (readView != null) {
 				throw new IllegalStateException("Subpartition is being or already has been " +
@@ -216,6 +223,7 @@ class SpillableSubpartition extends ResultSubpartition {
 				readView = new SpillableSubpartitionView(
 						this, bufferProvider, buffers.size(), ioMode);
 			}
+			readViews.add(readView);
 
 			return readView;
 		}
@@ -225,7 +233,7 @@ class SpillableSubpartition extends ResultSubpartition {
 	public String toString() {
 		return String.format("SpillableSubpartition [%d number of buffers (%d bytes)," +
 						"finished? %s, read view? %s, spilled? %s]",
-				getTotalNumberOfBuffers(), getTotalNumberOfBytes(), isFinished, readView != null,
+				getTotalNumberOfBuffers(), getTotalNumberOfBytes(), isFinished, readViews.size() != 0,
 				spillWriter != null);
 	}
 }
