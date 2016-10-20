@@ -112,7 +112,7 @@ class SpillableSubpartition extends ResultSubpartition {
 
 	@Override
 	public void release() throws IOException {
-		//final ResultSubpartitionView view;
+		final ArrayList<ResultSubpartitionView> views;
 
 		synchronized (buffers) {
 			if (isReleased) {
@@ -137,16 +137,19 @@ class SpillableSubpartition extends ResultSubpartition {
 			view = readView;
 			readView = null;
 			*/
+			views = readViews;
+			readViews = null;
 
 			isReleased = true;
 		}
 
-		for (final ResultSubpartitionView view: readViews) {
+		for (final ResultSubpartitionView view: views) {
 			// Release the view outside of the synchronized block
 			if (view != null) {
 				view.notifySubpartitionConsumed();
 			}
 		}
+		views.clear();
 	}
 
 	@Override

@@ -143,11 +143,23 @@ public class BroadcastVariableMaterialization<T, C> {
 				if (LOG.isDebugEnabled()) {
 					LOG.debug("Getting Broadcast Variable (" + key + ") - shared access.");
 				}
+
 				
-				/*
-				T element = serializer.createInstance();
-				while ((element = readerIterator.next(element)) != null);
-				*/
+				((SingleInputGate)((AbstractReader)reader).inputGate).consumedSubpartitionIndex = actualConsumedSubpartitionIndex;
+
+
+				@SuppressWarnings("unchecked")
+				final MutableReader<DeserializationDelegate<T>> typedReader1 = (MutableReader<DeserializationDelegate<T>>) reader;
+
+				@SuppressWarnings("unchecked")
+				final TypeSerializer<T> serializer1 = ((TypeSerializerFactory<T>) serializerFactory).getSerializer();
+
+				final ReaderIterator<T> readerIterator1 = new ReaderIterator<T>(typedReader1, serializer1);
+				
+				
+				T element = serializer1.createInstance();
+				while ((element = readerIterator1.next(element)) != null);
+				
 				
 				synchronized (materializationMonitor) {
 					while (!this.materialized && !disposed) {
@@ -155,7 +167,24 @@ public class BroadcastVariableMaterialization<T, C> {
 					}
 				}
 			}
-			((SingleInputGate)((AbstractReader)reader).inputGate).consumedSubpartitionIndex = actualConsumedSubpartitionIndex;
+			
+			if (actualConsumedSubpartitionIndex != 0) {
+				((SingleInputGate)((AbstractReader)reader).inputGate).consumedSubpartitionIndex = actualConsumedSubpartitionIndex;
+
+				@SuppressWarnings("unchecked")
+				final MutableReader<DeserializationDelegate<T>> typedReader1 = (MutableReader<DeserializationDelegate<T>>) reader;
+
+				@SuppressWarnings("unchecked")
+				final TypeSerializer<T> serializer1 = ((TypeSerializerFactory<T>) serializerFactory).getSerializer();
+
+				final ReaderIterator<T> readerIterator1 = new ReaderIterator<T>(typedReader1, serializer1);
+
+
+				T element = serializer1.createInstance();
+				while ((element = readerIterator1.next(element)) != null);
+			}
+			
+			((SingleInputGate)((AbstractReader)reader).inputGate).releaseAllResources();
 		}
 		catch (Throwable t) {
 			// in case of an exception, we need to clean up big time
