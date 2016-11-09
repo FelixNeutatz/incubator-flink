@@ -278,8 +278,29 @@ public class ExecutionVertex implements Serializable {
 		// add the consumers to the source
 		// for now (until the receiver initiated handshake is in place), we need to register the 
 		// edges as the execution graph
-		for (ExecutionEdge ee : edges) {
-			ee.getSource().addConsumer(ee, consumerNumber);
+		if (pattern == DistributionPattern.BROADCAST) {
+			System.out.println("loop start: ");
+		}
+		
+		for (int ei = 0; ei < edges.length; ei++) {
+			ExecutionEdge ee = edges[ei];
+			
+			if (pattern == DistributionPattern.BROADCAST) {
+				System.out.println("conusmer number: " + consumerNumber);
+				System.out.println("Target Execution edge ee: " + ee.toString());
+				System.out.println("Target Execution vertex ee: " + ee.getTarget().getSimpleName() );
+				System.out.println("\tPartition number Source of ee: " + ee.getSource() + " part: " +  ee.getSource().getPartitionNumber() + 
+					"parent:" + ee.getSource().getIntermediateResult().producer.getJobVertex().getName() +
+					"intermediate result id: " +  ee.getSource().getIntermediateResult().getId() 
+				);
+				ee.getSource().addBroadcastConsumer(ee);
+			} else {
+				ee.getSource().addConsumer(ee, consumerNumber);
+			}
+		}
+
+		if (pattern == DistributionPattern.BROADCAST) {
+			System.out.println("loop ende:) ");
 		}
 	}
 
@@ -654,8 +675,9 @@ public class ExecutionVertex implements Serializable {
 			if (this.getSimpleName().contains("Generate broadcast vector")) {
 				partition.totalResult.resultType = ResultPartitionType.BLOCKING;
 			}*/
-			producedPartitions.add(ResultPartitionDeploymentDescriptor.from(partition));
 			System.err.println("taskname: " + this.getSimpleName() + "is broadcasting:" + this.getJobVertex() + " blocking: " + partition.getResultType());
+			producedPartitions.add(ResultPartitionDeploymentDescriptor.from(partition));
+			//System.err.println("taskname: " + this.getSimpleName() + "is broadcasting:" + this.getJobVertex() + " blocking: " + partition.getResultType());
 		}
 
 		// Consumed intermediate results

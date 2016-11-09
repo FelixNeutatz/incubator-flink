@@ -266,7 +266,6 @@ public class ExecutionJobVertex implements Serializable {
 			this.inputs.add(ires);
 			
 			int consumerIndex = ires.registerConsumer();
-			
 			for (int i = 0; i < parallelism; i++) {
 				ExecutionVertex ev = taskVertices[i];
 				ev.connectSource(num, ires, edge, consumerIndex);

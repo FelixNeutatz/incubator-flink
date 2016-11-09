@@ -84,7 +84,7 @@ public class ResultPartition implements BufferPoolOwner {
 	private final ResultPartitionID partitionId;
 
 	/** Type of this partition. Defines the concrete subpartition implementation to use. */
-	private final ResultPartitionType partitionType;
+	public final ResultPartitionType partitionType;
 
 	/**
 	 * Flag indicating whether to eagerly deploy consumers.
@@ -341,7 +341,7 @@ public class ResultPartition implements BufferPoolOwner {
 		int refCnt = pendingReferences.get();
 
 		checkState(refCnt != -1, "Partition released.");
-		checkState(refCnt > 0, "Partition not pinned.");
+		//checkState(refCnt > 0, "Partition not pinned.");
 
 		checkElementIndex(index, subpartitions.length, "Subpartition not found.");
 
@@ -421,7 +421,7 @@ public class ResultPartition implements BufferPoolOwner {
 			partitionManager.onConsumedPartition(this);
 		}
 		else if (refCnt < 0) {
-			throw new IllegalStateException("All references released.");
+			//throw new IllegalStateException("All references released.");
 		}
 
 		LOG.debug("{}: Received release notification for subpartition {} (reference count now at: {}).",

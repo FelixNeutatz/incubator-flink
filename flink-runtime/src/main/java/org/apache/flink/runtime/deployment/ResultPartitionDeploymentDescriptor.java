@@ -18,6 +18,7 @@
 
 package org.apache.flink.runtime.deployment;
 
+import org.apache.flink.runtime.executiongraph.ExecutionEdge;
 import org.apache.flink.runtime.executiongraph.IntermediateResultPartition;
 import org.apache.flink.runtime.io.network.partition.ResultPartition;
 import org.apache.flink.runtime.io.network.partition.ResultPartitionType;
@@ -25,6 +26,7 @@ import org.apache.flink.runtime.jobgraph.IntermediateDataSetID;
 import org.apache.flink.runtime.jobgraph.IntermediateResultPartitionID;
 
 import java.io.Serializable;
+import java.util.List;
 
 import static org.apache.flink.util.Preconditions.checkArgument;
 import static org.apache.flink.util.Preconditions.checkNotNull;
@@ -119,14 +121,24 @@ public class ResultPartitionDeploymentDescriptor implements Serializable {
 		// one for each consuming sub task.
 		int numberOfSubpartitions = 1;
 
+		System.out.print("list outer size: " + partition.getConsumers().size());
+		for (List<ExecutionEdge> list : partition.getConsumers()) {
+			System.out.println("\tlist inner size: " + list.size());
+			for (int i = 0; i < list.size(); i++)
+				System.out.println("\t\telement: " + list.get(i).toString() + " partition" + list.get(i).getSource().getPartitionNumber());
+		}
+
 		if (!partition.getConsumers().isEmpty() && !partition.getConsumers().get(0).isEmpty()) {
 
+			/*
 			if (partition.getConsumers().size() > 1) {
 				new IllegalStateException("Currently, only a single consumer group per partition is supported.");
-			}
+			}*/
 
 			numberOfSubpartitions = partition.getConsumers().get(0).size();
 		}
+
+		System.out.println("numbersubpartition: " + numberOfSubpartitions);
 
 		return new ResultPartitionDeploymentDescriptor(
 				resultId, partitionId, partitionType, numberOfSubpartitions,

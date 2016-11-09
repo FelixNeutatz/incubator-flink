@@ -30,7 +30,7 @@ public class IntermediateResult {
 
 	private final IntermediateDataSetID id;
 
-	private final ExecutionJobVertex producer;
+	public final ExecutionJobVertex producer;
 
 	private final IntermediateResultPartition[] partitions;
 
@@ -40,7 +40,7 @@ public class IntermediateResult {
 
 	private int partitionsAssigned;
 
-	private int numConsumers;
+	public int numConsumers;
 
 	private final int connectionIndex;
 
@@ -121,6 +121,13 @@ public class IntermediateResult {
 				throw new RuntimeException("Inconsistent consumer mapping between intermediate result partitions.");
 			}
 		}
+		return index;
+	}
+
+	public int registerBroadcastConsumer() {
+		final int index = numConsumers;
+		numConsumers++;
+		
 		return index;
 	}
 

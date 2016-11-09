@@ -72,6 +72,7 @@ public class ResultPartitionManager implements ResultPartitionProvider {
 			final ResultPartition partition = registeredPartitions.get(partitionId.getProducerId(),
 					partitionId.getPartitionId());
 
+			//TODO: Problem here
 			if (partition == null) {
 				throw new PartitionNotFoundException(partitionId);
 			}
@@ -128,22 +129,27 @@ public class ResultPartitionManager implements ResultPartitionProvider {
 	// ------------------------------------------------------------------------
 
 	void onConsumedPartition(ResultPartition partition) {
-		final ResultPartition previous;
+		if (partition.partitionType == ResultPartitionType.PIPELINED) {
 
-		LOG.debug("Received consume notification from {}.", partition);
+			final ResultPartition previous;
 
-		synchronized (registeredPartitions) {
-			ResultPartitionID partitionId = partition.getPartitionId();
+			LOG.debug("Received consume notification from {}.", partition);
 
-			previous = registeredPartitions.remove(partitionId.getProducerId(),
+			synchronized (registeredPartitions) {
+				ResultPartitionID partitionId = partition.getPartitionId();
+
+				previous = registeredPartitions.remove(partitionId.getProducerId(),
 					partitionId.getPartitionId());
-		}
+			}
 
-		// Release the partition if it was successfully removed
-		if (partition == previous) {
-			partition.release();
+			// Release the partition if it was successfully removed
+			if (partition == previous) {
+				partition.release();
 
-			LOG.debug("Released {}.", partition);
+				LOG.debug("Released {}.", partition);
+			}
+		} else{
+			System.out.println("ResultPartitionManager blocked release: " + partition);
 		}
 	}
 }

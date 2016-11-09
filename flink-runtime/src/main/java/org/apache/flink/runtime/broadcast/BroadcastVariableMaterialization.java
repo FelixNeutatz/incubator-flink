@@ -94,8 +94,10 @@ public class BroadcastVariableMaterialization<T, C> {
 		}
 
 		try {
-			int actualConsumedSubpartitionIndex = ((SingleInputGate)((AbstractReader)reader).inputGate).consumedSubpartitionIndex;
-			((SingleInputGate)((AbstractReader)reader).inputGate).consumedSubpartitionIndex = 0;
+			System.out.println("actual id: " + ((SingleInputGate)((AbstractReader)reader).inputGate).consumedSubpartitionIndex);
+			
+			//int actualConsumedSubpartitionIndex = ((SingleInputGate)((AbstractReader)reader).inputGate).consumedSubpartitionIndex;
+			//((SingleInputGate)((AbstractReader)reader).inputGate).consumedSubpartitionIndex = 0;
 			
 			@SuppressWarnings("unchecked")
 			final MutableReader<DeserializationDelegate<T>> typedReader = (MutableReader<DeserializationDelegate<T>>) reader;
@@ -118,14 +120,14 @@ public class BroadcastVariableMaterialization<T, C> {
 					data.add(element);
 				}
 				
-				/*
+				
 				System.err.print("data: " + data.size() + " ");
 				
 				for (T e: data){
 					System.err.print(e + ", ");
 				}
 				System.err.println("");
-				*/
+				
 				
 				synchronized (materializationMonitor) {
 					this.data = data;
@@ -144,47 +146,12 @@ public class BroadcastVariableMaterialization<T, C> {
 					LOG.debug("Getting Broadcast Variable (" + key + ") - shared access.");
 				}
 
-				
-				((SingleInputGate)((AbstractReader)reader).inputGate).consumedSubpartitionIndex = actualConsumedSubpartitionIndex;
-
-
-				@SuppressWarnings("unchecked")
-				final MutableReader<DeserializationDelegate<T>> typedReader1 = (MutableReader<DeserializationDelegate<T>>) reader;
-
-				@SuppressWarnings("unchecked")
-				final TypeSerializer<T> serializer1 = ((TypeSerializerFactory<T>) serializerFactory).getSerializer();
-
-				final ReaderIterator<T> readerIterator1 = new ReaderIterator<T>(typedReader1, serializer1);
-				
-				
-				T element = serializer1.createInstance();
-				while ((element = readerIterator1.next(element)) != null);
-				
-				
 				synchronized (materializationMonitor) {
 					while (!this.materialized && !disposed) {
 						materializationMonitor.wait();
 					}
 				}
 			}
-			
-			if (actualConsumedSubpartitionIndex != 0) {
-				((SingleInputGate)((AbstractReader)reader).inputGate).consumedSubpartitionIndex = actualConsumedSubpartitionIndex;
-
-				@SuppressWarnings("unchecked")
-				final MutableReader<DeserializationDelegate<T>> typedReader1 = (MutableReader<DeserializationDelegate<T>>) reader;
-
-				@SuppressWarnings("unchecked")
-				final TypeSerializer<T> serializer1 = ((TypeSerializerFactory<T>) serializerFactory).getSerializer();
-
-				final ReaderIterator<T> readerIterator1 = new ReaderIterator<T>(typedReader1, serializer1);
-
-
-				T element = serializer1.createInstance();
-				while ((element = readerIterator1.next(element)) != null);
-			}
-			
-			((SingleInputGate)((AbstractReader)reader).inputGate).releaseAllResources();
 		}
 		catch (Throwable t) {
 			// in case of an exception, we need to clean up big time
