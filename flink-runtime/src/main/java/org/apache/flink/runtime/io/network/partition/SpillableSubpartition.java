@@ -30,6 +30,8 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -62,7 +64,10 @@ class SpillableSubpartition extends ResultSubpartition {
 	private volatile boolean isReleased;
 
 	/** The read view to consume this subpartition. */
-	private ArrayList<ResultSubpartitionView> readViews;
+	private ConcurrentLinkedQueue<ResultSubpartitionView> readViews;
+
+	private final Object lock = new Object();
+	private AtomicInteger releaseRequests;
 
 	SpillableSubpartition(int index, ResultPartition parent, IOManager ioManager, IOMode ioMode) {
 		super(index, parent);
@@ -70,7 +75,9 @@ class SpillableSubpartition extends ResultSubpartition {
 		this.ioManager = checkNotNull(ioManager);
 		this.ioMode = checkNotNull(ioMode);
 		
-		this.readViews = new ArrayList<ResultSubpartitionView>();
+		this.readViews = new ConcurrentLinkedQueue<ResultSubpartitionView>();
+		
+		this.releaseRequests = new AtomicInteger(0);
 	}
 
 	@Override
@@ -111,8 +118,21 @@ class SpillableSubpartition extends ResultSubpartition {
 	}
 
 	@Override
+	protected void onConsumedSubpartition() {
+
+		//System.out.println("release read view: " + System.nanoTime() + " readview count: " + readViews.size());
+
+		releaseRequests.addAndGet(1);
+		
+		if (releaseRequests.get() >= 2) {
+			parent.onConsumedSubpartition(index);
+		}
+	}
+	
+
+	@Override
 	public void release() throws IOException {
-		final ArrayList<ResultSubpartitionView> views;
+		final ConcurrentLinkedQueue<ResultSubpartitionView> views;
 
 		synchronized (buffers) {
 			if (isReleased) {
@@ -133,10 +153,6 @@ class SpillableSubpartition extends ResultSubpartition {
 			}
 
 			// Get the view...
-			/*
-			view = readView;
-			readView = null;
-			*/
 			views = readViews;
 			readViews = null;
 
@@ -146,7 +162,7 @@ class SpillableSubpartition extends ResultSubpartition {
 		for (final ResultSubpartitionView view: views) {
 			// Release the view outside of the synchronized block
 			if (view != null) {
-				view.notifySubpartitionConsumed();
+				//view.notifySubpartitionConsumed();
 			}
 		}
 		views.clear();
@@ -227,6 +243,7 @@ class SpillableSubpartition extends ResultSubpartition {
 						this, bufferProvider, buffers.size(), ioMode);
 			}
 			readViews.add(readView);
+			//System.out.println("create read view: " + System.nanoTime()  + " readview count: " + readViews.size());
 
 			return readView;
 		}

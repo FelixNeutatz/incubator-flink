@@ -129,27 +129,24 @@ public class ResultPartitionManager implements ResultPartitionProvider {
 	// ------------------------------------------------------------------------
 
 	void onConsumedPartition(ResultPartition partition) {
-		if (partition.partitionType == ResultPartitionType.PIPELINED) {
+		
+		final ResultPartition previous;
 
-			final ResultPartition previous;
+		LOG.debug("Received consume notification from {}.", partition);
 
-			LOG.debug("Received consume notification from {}.", partition);
+		synchronized (registeredPartitions) {
+			ResultPartitionID partitionId = partition.getPartitionId();
 
-			synchronized (registeredPartitions) {
-				ResultPartitionID partitionId = partition.getPartitionId();
-
-				previous = registeredPartitions.remove(partitionId.getProducerId(),
-					partitionId.getPartitionId());
-			}
-
-			// Release the partition if it was successfully removed
-			if (partition == previous) {
-				partition.release();
-
-				LOG.debug("Released {}.", partition);
-			}
-		} else{
-			System.out.println("ResultPartitionManager blocked release: " + partition);
+			previous = registeredPartitions.remove(partitionId.getProducerId(),
+				partitionId.getPartitionId());
 		}
+
+		// Release the partition if it was successfully removed
+		if (partition == previous) {
+			partition.release();
+
+			LOG.debug("Released {}.", partition);
+		}
+		
 	}
 }
