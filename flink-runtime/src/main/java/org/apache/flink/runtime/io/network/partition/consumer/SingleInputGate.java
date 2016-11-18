@@ -167,6 +167,8 @@ public class SingleInputGate implements InputGate {
 	/** A timer to retrigger local partition requests. Only initialized if actually needed. */
 	private Timer retriggerLocalRequestTimer;
 
+	private final Object monitor = new Object();
+
 	public SingleInputGate(
 			String owningTaskName,
 			JobID jobId,
@@ -292,6 +294,10 @@ public class SingleInputGate implements InputGate {
 
 				if (--numberOfUninitializedChannels == 0) {
 					pendingEvents.clear();
+				}
+
+				synchronized (monitor) {
+					monitor.notifyAll();
 				}
 			}
 		}
@@ -464,7 +470,11 @@ public class SingleInputGate implements InputGate {
 					isInputChannelReleased.set(i);
 				}
 			}
-			Thread.sleep(100);
+			if (isInputChannelReleased.cardinality() < inputChannels.size()) {
+				synchronized (monitor) {
+					monitor.wait();
+				}
+			}
 		}
 	}
 
