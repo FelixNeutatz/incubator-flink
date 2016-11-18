@@ -59,6 +59,8 @@ public class BroadcastVariableMaterialization<T, C> {
 	
 	private boolean disposed;
 	
+	private int subpartitionIndex;
+	
 	
 	public BroadcastVariableMaterialization(BroadcastVariableKey key) {
 		this.key = key;
@@ -94,11 +96,6 @@ public class BroadcastVariableMaterialization<T, C> {
 		}
 
 		try {
-			System.out.println("actual id: " + ((SingleInputGate)((AbstractReader)reader).inputGate).consumedSubpartitionIndex);
-			
-			//int actualConsumedSubpartitionIndex = ((SingleInputGate)((AbstractReader)reader).inputGate).consumedSubpartitionIndex;
-			//((SingleInputGate)((AbstractReader)reader).inputGate).consumedSubpartitionIndex = 0;
-			
 			@SuppressWarnings("unchecked")
 			final MutableReader<DeserializationDelegate<T>> typedReader = (MutableReader<DeserializationDelegate<T>>) reader;
 			
@@ -108,6 +105,8 @@ public class BroadcastVariableMaterialization<T, C> {
 			final ReaderIterator<T> readerIterator = new ReaderIterator<T>(typedReader, serializer);
 			
 			if (materializer) {
+				subpartitionIndex = ((SingleInputGate)((AbstractReader)reader).inputGate).consumedSubpartitionIndex;
+
 				// first one, so we need to materialize;
 				if (LOG.isDebugEnabled()) {
 					LOG.debug("Getting Broadcast Variable (" + key + ") - First access, materializing.");
@@ -141,7 +140,12 @@ public class BroadcastVariableMaterialization<T, C> {
 				}
 			}
 			else {
-				((SingleInputGate)((AbstractReader)reader).inputGate).notifySubpartitionConsumed();
+				if (((SingleInputGate)((AbstractReader)reader).inputGate).consumedSubpartitionIndex == subpartitionIndex) {
+					((SingleInputGate) ((AbstractReader) reader).inputGate).notifySubpartitionConsumed();
+				} else {
+					T element = serializer.createInstance();
+					while ((element = readerIterator.next(element)) != null);
+				}
 				
 				// successor: discard all data and refer to the shared variable
 				
