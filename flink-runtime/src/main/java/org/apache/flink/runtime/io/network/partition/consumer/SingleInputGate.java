@@ -450,6 +450,24 @@ public class SingleInputGate implements InputGate {
 			return new BufferOrEvent(event, currentChannel.getChannelIndex());
 		}
 	}
+	
+	public void notifySubpartitionConsumed() throws IOException, InterruptedException {
+		requestPartitions();
+
+		BitSet isInputChannelReleased = new BitSet(inputChannels.size());
+		while(isInputChannelReleased.cardinality() < inputChannels.size()) {
+			InputChannel [] inputChannelsArray = (InputChannel[]) inputChannels.values().toArray();
+			for (int i = 0; i < inputChannels.size(); i++) {
+				InputChannel inputChannel = inputChannelsArray[i];
+				if (inputChannel.getClass() != UnknownInputChannel.class && !isInputChannelReleased.get(i)) {
+					inputChannel.notifySubpartitionConsumed();
+					inputChannel.releaseAllResources();
+					isInputChannelReleased.set(i);
+				}
+			}
+			Thread.sleep(100);
+		}
+	}
 
 	@Override
 	public void sendTaskEvent(TaskEvent event) throws IOException {

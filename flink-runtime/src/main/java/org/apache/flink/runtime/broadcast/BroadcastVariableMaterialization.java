@@ -120,13 +120,14 @@ public class BroadcastVariableMaterialization<T, C> {
 					data.add(element);
 				}
 				
-				
+				/*
 				System.err.print("data: " + data.size() + " ");
 				
 				for (T e: data){
 					System.err.print(e + ", ");
 				}
 				System.err.println("");
+				*/
 				
 				
 				synchronized (materializationMonitor) {
@@ -140,6 +141,8 @@ public class BroadcastVariableMaterialization<T, C> {
 				}
 			}
 			else {
+				((SingleInputGate)((AbstractReader)reader).inputGate).notifySubpartitionConsumed();
+				
 				// successor: discard all data and refer to the shared variable
 				
 				if (LOG.isDebugEnabled()) {

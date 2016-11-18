@@ -127,6 +127,8 @@ public class ResultPartition implements BufferPoolOwner {
 
 	/** The total number of bytes (both data and event buffers) */
 	private long totalNumberOfBytes;
+	
+	private int numberOfSubtasks;
 
 	public ResultPartition(
 			String owningTaskName,
@@ -176,6 +178,57 @@ public class ResultPartition implements BufferPoolOwner {
 		LOG.debug("{}: Initialized {}", owningTaskName, this);
 	}
 
+
+	public ResultPartition(
+		String owningTaskName,
+		JobID jobId,
+		ResultPartitionID partitionId,
+		ResultPartitionType partitionType,
+		boolean eagerlyDeployConsumers,
+		int numberOfSubpartitions,
+		ResultPartitionManager partitionManager,
+		ResultPartitionConsumableNotifier partitionConsumableNotifier,
+		IOManager ioManager,
+		IOMode defaultIoMode,
+		int numberOfSubtasks) {
+
+		this.owningTaskName = checkNotNull(owningTaskName);
+		this.jobId = checkNotNull(jobId);
+		this.partitionId = checkNotNull(partitionId);
+		this.partitionType = checkNotNull(partitionType);
+		this.eagerlyDeployConsumers = eagerlyDeployConsumers;
+		this.subpartitions = new ResultSubpartition[numberOfSubpartitions];
+		this.partitionManager = checkNotNull(partitionManager);
+		this.partitionConsumableNotifier = checkNotNull(partitionConsumableNotifier);
+		this.numberOfSubtasks = numberOfSubtasks;
+
+		// Create the subpartitions.
+		switch (partitionType) {
+			case BLOCKING:
+				for (int i = 0; i < subpartitions.length; i++) {
+					subpartitions[i] = new SpillableSubpartition(
+						i, this, ioManager, defaultIoMode);
+				}
+
+				break;
+
+			case PIPELINED:
+				for (int i = 0; i < subpartitions.length; i++) {
+					subpartitions[i] = new PipelinedSubpartition(i, this);
+				}
+
+				break;
+
+			default:
+				throw new IllegalArgumentException("Unsupported result partition type.");
+		}
+
+		// Initially, partitions should be consumed once before release.
+		pin();
+
+		LOG.debug("{}: Initialized {}", owningTaskName, this);
+	}
+	
 	/**
 	 * Registers a buffer pool with this result partition.
 	 * <p>
@@ -231,6 +284,10 @@ public class ResultPartition implements BufferPoolOwner {
 
 	public long getTotalNumberOfBytes() {
 		return totalNumberOfBytes;
+	}
+
+	public int getNumberOfSubtasks() {
+		return numberOfSubtasks;
 	}
 
 	// ------------------------------------------------------------------------
@@ -341,7 +398,7 @@ public class ResultPartition implements BufferPoolOwner {
 		int refCnt = pendingReferences.get();
 
 		checkState(refCnt != -1, "Partition released.");
-		//checkState(refCnt > 0, "Partition not pinned.");
+		checkState(refCnt > 0, "Partition not pinned.");
 
 		checkElementIndex(index, subpartitions.length, "Subpartition not found.");
 

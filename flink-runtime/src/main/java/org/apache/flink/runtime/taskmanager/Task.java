@@ -305,7 +305,8 @@ public class Task implements Runnable {
 					networkEnvironment.getPartitionManager(),
 					networkEnvironment.getPartitionConsumableNotifier(),
 					ioManager,
-					networkEnvironment.getDefaultIOMode());
+					networkEnvironment.getDefaultIOMode(),
+				    tdd.getNumberOfSubtasks());
 
 			this.writers[i] = new ResultPartitionWriter(this.producedPartitions[i]);
 		}

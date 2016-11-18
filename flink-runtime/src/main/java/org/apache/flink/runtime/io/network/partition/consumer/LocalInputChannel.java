@@ -119,7 +119,7 @@ public class LocalInputChannel extends InputChannel implements NotificationListe
 				if (subpartitionView == null) {
 					throw new IOException("Error requesting subpartition.");
 				}
-
+				//TODO: check whether we can rid of this when we only discard
 				getNextLookAhead();
 			}
 		}

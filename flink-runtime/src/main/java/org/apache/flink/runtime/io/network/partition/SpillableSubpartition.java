@@ -68,6 +68,8 @@ class SpillableSubpartition extends ResultSubpartition {
 
 	private final Object lock = new Object();
 	private AtomicInteger releaseRequests;
+	
+	private long id;
 
 	SpillableSubpartition(int index, ResultPartition parent, IOManager ioManager, IOMode ioMode) {
 		super(index, parent);
@@ -78,6 +80,8 @@ class SpillableSubpartition extends ResultSubpartition {
 		this.readViews = new ConcurrentLinkedQueue<ResultSubpartitionView>();
 		
 		this.releaseRequests = new AtomicInteger(0);
+		
+		this.id = System.nanoTime();
 	}
 
 	@Override
@@ -119,12 +123,9 @@ class SpillableSubpartition extends ResultSubpartition {
 
 	@Override
 	protected void onConsumedSubpartition() {
-
-		//System.out.println("release read view: " + System.nanoTime() + " readview count: " + readViews.size());
-
 		releaseRequests.addAndGet(1);
-		
-		if (releaseRequests.get() >= 2) {
+
+		if (releaseRequests.get() >= parent.getNumberOfSubtasks()) {
 			parent.onConsumedSubpartition(index);
 		}
 	}
