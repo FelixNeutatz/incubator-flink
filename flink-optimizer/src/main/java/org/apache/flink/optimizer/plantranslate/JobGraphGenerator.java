@@ -1089,7 +1089,11 @@ public class JobGraphGenerator implements Visitor<PlanNode> {
 				distributionPattern = DistributionPattern.POINTWISE;
 				break;
 			case BROADCAST:
-				distributionPattern = DistributionPattern.BROADCAST;
+				if (channel.getSource().isOnDynamicPath()) {
+					distributionPattern = DistributionPattern.ALL_TO_ALL;
+				} else {
+					distributionPattern = DistributionPattern.BROADCAST;
+				}
 				break;
 			case PARTITION_RANDOM:
 			case PARTITION_HASH:
@@ -1102,7 +1106,7 @@ public class JobGraphGenerator implements Visitor<PlanNode> {
 				throw new RuntimeException("Unknown runtime ship strategy: " + channel.getShipStrategy());
 		}
 
-		final ResultPartitionType resultType;
+		ResultPartitionType resultType;
 
 		switch (channel.getDataExchangeMode()) {
 
@@ -1126,6 +1130,11 @@ public class JobGraphGenerator implements Visitor<PlanNode> {
 			default:
 				throw new UnsupportedOperationException("Unknown data exchange mode.");
 
+		}
+
+		if (distributionPattern == DistributionPattern.BROADCAST) {
+			System.err.println("changed to blocking");
+			resultType = ResultPartitionType.BLOCKING;
 		}
 
 		JobEdge edge = targetVertex.connectNewDataSetAsInput(sourceVertex, distributionPattern, resultType);

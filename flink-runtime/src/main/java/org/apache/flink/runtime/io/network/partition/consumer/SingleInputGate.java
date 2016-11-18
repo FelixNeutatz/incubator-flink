@@ -456,9 +456,8 @@ public class SingleInputGate implements InputGate {
 
 		BitSet isInputChannelReleased = new BitSet(inputChannels.size());
 		while(isInputChannelReleased.cardinality() < inputChannels.size()) {
-			InputChannel [] inputChannelsArray = (InputChannel[]) inputChannels.values().toArray();
 			for (int i = 0; i < inputChannels.size(); i++) {
-				InputChannel inputChannel = inputChannelsArray[i];
+				InputChannel inputChannel = (InputChannel) inputChannels.values().toArray()[i];
 				if (inputChannel.getClass() != UnknownInputChannel.class && !isInputChannelReleased.get(i)) {
 					inputChannel.notifySubpartitionConsumed();
 					inputChannel.releaseAllResources();
