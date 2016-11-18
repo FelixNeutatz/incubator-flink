@@ -146,7 +146,7 @@ public class BroadcastVariableMaterialization<T, C> {
 					T element = serializer.createInstance();
 					while ((element = readerIterator.next(element)) != null);
 				}
-				
+
 				// successor: discard all data and refer to the shared variable
 				
 				if (LOG.isDebugEnabled()) {
