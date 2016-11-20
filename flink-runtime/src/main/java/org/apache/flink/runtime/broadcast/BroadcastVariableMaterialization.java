@@ -119,14 +119,15 @@ public class BroadcastVariableMaterialization<T, C> {
 					data.add(element);
 				}
 				
-				/*
+				
 				System.err.print("data: " + data.size() + " ");
 				
+				/*
 				for (T e: data){
 					System.err.print(e + ", ");
-				}
+				}*/
 				System.err.println("");
-				*/
+				
 				
 				
 				synchronized (materializationMonitor) {
@@ -140,12 +141,15 @@ public class BroadcastVariableMaterialization<T, C> {
 				}
 			}
 			else {
+				/*
 				if (((SingleInputGate)((AbstractReader)reader).inputGate).consumedSubpartitionIndex == subpartitionIndex) {
-					((SingleInputGate) ((AbstractReader) reader).inputGate).notifySubpartitionConsumed();
+					((SingleInputGate) ((AbstractReader) reader).inputGate).notifySubpartitionConsumed(false);
 				} else {
 					T element = serializer.createInstance();
 					while ((element = readerIterator.next(element)) != null);
-				}
+				}*/
+
+				((SingleInputGate) ((AbstractReader) reader).inputGate).notifySubpartitionConsumed(false);
 
 				// successor: discard all data and refer to the shared variable
 				

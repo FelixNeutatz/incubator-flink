@@ -95,7 +95,7 @@ public class LocalInputChannel extends InputChannel implements NotificationListe
 	// ------------------------------------------------------------------------
 
 	@Override
-	void requestSubpartition(int subpartitionIndex) throws IOException, InterruptedException {
+	void requestSubpartition(int subpartitionIndex, boolean read) throws IOException, InterruptedException {
 		// The lock is required to request only once in the presence of retriggered requests.
 		synchronized (requestLock) {
 			if (subpartitionView == null) {
@@ -120,7 +120,9 @@ public class LocalInputChannel extends InputChannel implements NotificationListe
 					throw new IOException("Error requesting subpartition.");
 				}
 				//TODO: check whether we can rid of this when we only discard
-				getNextLookAhead();
+				if (read) {
+					getNextLookAhead();
+				}
 			}
 		}
 	}
@@ -128,7 +130,7 @@ public class LocalInputChannel extends InputChannel implements NotificationListe
 	/**
 	 * Retriggers a subpartition request.
 	 */
-	void retriggerSubpartitionRequest(Timer timer, final int subpartitionIndex) throws IOException, InterruptedException {
+	void retriggerSubpartitionRequest(Timer timer, final int subpartitionIndex, final boolean read) throws IOException, InterruptedException {
 		synchronized (requestLock) {
 			checkState(subpartitionView == null, "Already requested partition.");
 
@@ -136,7 +138,7 @@ public class LocalInputChannel extends InputChannel implements NotificationListe
 				@Override
 				public void run() {
 					try {
-						requestSubpartition(subpartitionIndex);
+						requestSubpartition(subpartitionIndex, read);
 					}
 					catch (Throwable t) {
 						setError(t);

@@ -144,6 +144,8 @@ class SpillableSubpartition extends ResultSubpartition {
 	protected void onConsumedSubpartition() {
 		if (isBroadcast) {
 			releaseRequests.addAndGet(1);
+			
+			System.err.println("id: "+ id + " req: " + releaseRequests.get() + " dop: " + parent.getNumberOfSubtasks());
 
 			if (releaseRequests.get() >= parent.getNumberOfSubtasks()) {
 				parent.onConsumedSubpartition(index);
@@ -247,6 +249,8 @@ class SpillableSubpartition extends ResultSubpartition {
 
 			if (isSpilled) {
 				if (ioMode.isSynchronous()) {
+					System.err.println("SpilledSubpartitionViewSyncIO");
+					
 					readView = new SpilledSubpartitionViewSyncIO(
 							this,
 							bufferProvider.getMemorySegmentSize(),
@@ -254,6 +258,7 @@ class SpillableSubpartition extends ResultSubpartition {
 							0);
 				}
 				else {
+					System.err.println("SpilledSubpartitionViewAsyncIO");
 					readView = new SpilledSubpartitionViewAsyncIO(
 							this,
 							bufferProvider,
@@ -263,6 +268,7 @@ class SpillableSubpartition extends ResultSubpartition {
 				}
 			}
 			else {
+				System.err.println("SpilledSubpartitionView");
 				readView = new SpillableSubpartitionView(
 						this, bufferProvider, buffers.size(), ioMode);
 			}

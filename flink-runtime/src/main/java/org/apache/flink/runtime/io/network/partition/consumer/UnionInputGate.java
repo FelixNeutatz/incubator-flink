@@ -127,10 +127,10 @@ public class UnionInputGate implements InputGate {
 	}
 
 	@Override
-	public void requestPartitions() throws IOException, InterruptedException {
+	public void requestPartitions(boolean read) throws IOException, InterruptedException {
 		if (!requestedPartitionsFlag) {
 			for (InputGate inputGate : inputGates) {
-				inputGate.requestPartitions();
+				inputGate.requestPartitions(read);
 			}
 
 			requestedPartitionsFlag = true;
@@ -145,7 +145,7 @@ public class UnionInputGate implements InputGate {
 		}
 
 		// Make sure to request the partitions, if they have not been requested before.
-		requestPartitions();
+		requestPartitions(true);
 
 		final InputGate inputGate = inputGateListener.getNextInputGateToReadFrom();
 

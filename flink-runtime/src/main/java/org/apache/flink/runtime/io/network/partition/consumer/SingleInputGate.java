@@ -168,6 +168,8 @@ public class SingleInputGate implements InputGate {
 	private Timer retriggerLocalRequestTimer;
 
 	private final Object monitor = new Object();
+	
+	private boolean isRead = true;
 
 	public SingleInputGate(
 			String owningTaskName,
@@ -285,7 +287,7 @@ public class SingleInputGate implements InputGate {
 				inputChannels.put(partitionId, newChannel);
 
 				if (requestedPartitionsFlag) {
-					newChannel.requestSubpartition(consumedSubpartitionIndex);
+					newChannel.requestSubpartition(consumedSubpartitionIndex, isRead);
 				}
 
 				for (TaskEvent event : pendingEvents) {
@@ -326,7 +328,7 @@ public class SingleInputGate implements InputGate {
 						retriggerLocalRequestTimer = new Timer(true);
 					}
 
-					ich.retriggerSubpartitionRequest(retriggerLocalRequestTimer, consumedSubpartitionIndex);
+					ich.retriggerSubpartitionRequest(retriggerLocalRequestTimer, consumedSubpartitionIndex, isRead);
 				}
 				else {
 					throw new IllegalStateException(
@@ -382,7 +384,7 @@ public class SingleInputGate implements InputGate {
 	}
 
 	@Override
-	public void requestPartitions() throws IOException, InterruptedException {
+	public void requestPartitions(boolean read) throws IOException, InterruptedException {
 		synchronized (requestLock) {
 			if (!requestedPartitionsFlag) {
 				if (isReleased) {
@@ -397,7 +399,7 @@ public class SingleInputGate implements InputGate {
 				}
 
 				for (InputChannel inputChannel : inputChannels.values()) {
-					inputChannel.requestSubpartition(consumedSubpartitionIndex);
+					inputChannel.requestSubpartition(consumedSubpartitionIndex, read);
 				}
 			}
 
@@ -416,7 +418,7 @@ public class SingleInputGate implements InputGate {
 			return null;
 		}
 
-		requestPartitions();
+		requestPartitions(true);
 
 		InputChannel currentChannel = null;
 		while (currentChannel == null) {
@@ -457,8 +459,12 @@ public class SingleInputGate implements InputGate {
 		}
 	}
 	
-	public void notifySubpartitionConsumed() throws IOException, InterruptedException {
-		requestPartitions();
+	public void notifySubpartitionConsumed(boolean read) throws IOException, InterruptedException {
+		
+
+		isRead = read;
+
+		requestPartitions(read);
 
 		BitSet isInputChannelReleased = new BitSet(inputChannels.size());
 		while(isInputChannelReleased.cardinality() < inputChannels.size()) {
@@ -471,9 +477,11 @@ public class SingleInputGate implements InputGate {
 				}
 			}
 			if (isInputChannelReleased.cardinality() < inputChannels.size()) {
+				/*
 				synchronized (monitor) {
 					monitor.wait();
-				}
+				}*/
+				Thread.sleep(100);
 			}
 		}
 	}

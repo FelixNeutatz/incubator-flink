@@ -71,7 +71,7 @@ public interface InputGate {
 
 	boolean isFinished();
 
-	void requestPartitions() throws IOException, InterruptedException;
+	void requestPartitions(boolean read) throws IOException, InterruptedException;
 
 	BufferOrEvent getNextBufferOrEvent() throws IOException, InterruptedException;
 

@@ -141,7 +141,7 @@ public class OutputEmitter<T> implements ChannelSelector<SerializationDelegate<T
 		case PARTITION_HASH:
 			return hashPartitionDefault(record.getInstance(), numberOfChannels);
 		case BROADCAST:
-			System.out.println("number channels: " + numberOfChannels);
+			//System.out.println("number channels: " + numberOfChannels);
 			return broadcast(numberOfChannels);
 		case PARTITION_CUSTOM:
 			return customPartition(record.getInstance(), numberOfChannels);

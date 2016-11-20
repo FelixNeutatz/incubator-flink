@@ -70,7 +70,7 @@ public class UnknownInputChannel extends InputChannel {
 	}
 
 	@Override
-	public void requestSubpartition(int subpartitionIndex) throws IOException {
+	public void requestSubpartition(int subpartitionIndex, boolean read) throws IOException {
 		// Nothing to do here
 	}
 

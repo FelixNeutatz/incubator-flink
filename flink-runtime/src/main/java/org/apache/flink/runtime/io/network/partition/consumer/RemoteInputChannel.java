@@ -111,7 +111,7 @@ public class RemoteInputChannel extends InputChannel {
 	 * Requests a remote subpartition.
 	 */
 	@Override
-	void requestSubpartition(int subpartitionIndex) throws IOException, InterruptedException {
+	void requestSubpartition(int subpartitionIndex, boolean read) throws IOException, InterruptedException {
 		if (partitionRequestClient == null) {
 			// Create a client and request the partition
 			partitionRequestClient = connectionManager

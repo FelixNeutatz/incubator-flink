@@ -118,7 +118,7 @@ public abstract class InputChannel {
 	 * The queue index to request depends on which sub task the channel belongs
 	 * to and is specified by the consumer of this channel.
 	 */
-	abstract void requestSubpartition(int subpartitionIndex) throws IOException, InterruptedException;
+	abstract void requestSubpartition(int subpartitionIndex, boolean read) throws IOException, InterruptedException;
 
 	/**
 	 * Returns the next buffer from the consumed subpartition.
