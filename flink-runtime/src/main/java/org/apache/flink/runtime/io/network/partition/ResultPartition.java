@@ -128,7 +128,7 @@ public class ResultPartition implements BufferPoolOwner {
 	/** The total number of bytes (both data and event buffers) */
 	private long totalNumberOfBytes;
 	
-	private int numberOfSubtasks;
+	private int numberOfConsumers;
 
 	public ResultPartition(
 			String owningTaskName,
@@ -198,7 +198,7 @@ public class ResultPartition implements BufferPoolOwner {
 		ResultPartitionConsumableNotifier partitionConsumableNotifier,
 		IOManager ioManager,
 		IOMode defaultIoMode,
-		int numberOfSubtasks) {
+		int numberOfConsumers) {
 
 		this.owningTaskName = checkNotNull(owningTaskName);
 		this.jobId = checkNotNull(jobId);
@@ -208,7 +208,7 @@ public class ResultPartition implements BufferPoolOwner {
 		this.subpartitions = new ResultSubpartition[numberOfSubpartitions];
 		this.partitionManager = checkNotNull(partitionManager);
 		this.partitionConsumableNotifier = checkNotNull(partitionConsumableNotifier);
-		this.numberOfSubtasks = numberOfSubtasks;
+		this.numberOfConsumers = numberOfConsumers;
 
 		// Create the subpartitions.
 		switch (partitionType) {
@@ -302,8 +302,8 @@ public class ResultPartition implements BufferPoolOwner {
 		return totalNumberOfBytes;
 	}
 
-	public int getNumberOfSubtasks() {
-		return numberOfSubtasks;
+	public int getNumberOfConsumers() {
+		return numberOfConsumers;
 	}
 
 	// ------------------------------------------------------------------------

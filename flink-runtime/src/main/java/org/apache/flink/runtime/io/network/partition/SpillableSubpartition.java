@@ -143,9 +143,7 @@ class SpillableSubpartition extends ResultSubpartition {
 	@Override
 	protected void onConsumedSubpartition() {
 		if (isBroadcast) {
-			releaseRequests.addAndGet(1);
-
-			if (releaseRequests.get() >= parent.getNumberOfSubtasks()) {
+			if (releaseRequests.addAndGet(1) >= parent.getNumberOfConsumers()) {
 				parent.onConsumedSubpartition(index);
 			}
 		} else {

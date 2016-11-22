@@ -50,6 +50,8 @@ public class ResultPartitionDeploymentDescriptor implements Serializable {
 	/** The number of subpartitions. */
 	private final int numberOfSubpartitions;
 
+	private final int numberOfConsumers;
+
 	/**
 	 * Flag indicating whether to eagerly deploy consumers.
 	 *
@@ -72,6 +74,25 @@ public class ResultPartitionDeploymentDescriptor implements Serializable {
 		checkArgument(numberOfSubpartitions >= 1);
 		this.numberOfSubpartitions = numberOfSubpartitions;
 		this.eagerlyDeployConsumers = eagerlyDeployConsumers;
+		this.numberOfConsumers = 1;
+	}
+
+	public ResultPartitionDeploymentDescriptor(
+		IntermediateDataSetID resultId,
+		IntermediateResultPartitionID partitionId,
+		ResultPartitionType partitionType,
+		int numberOfSubpartitions,
+		boolean eagerlyDeployConsumers,
+		int numberOfConsumers) {
+
+		this.resultId = checkNotNull(resultId);
+		this.partitionId = checkNotNull(partitionId);
+		this.partitionType = checkNotNull(partitionType);
+
+		checkArgument(numberOfSubpartitions >= 1);
+		this.numberOfSubpartitions = numberOfSubpartitions;
+		this.eagerlyDeployConsumers = eagerlyDeployConsumers;
+		this.numberOfConsumers = numberOfConsumers;
 	}
 
 	public IntermediateDataSetID getResultId() {
@@ -88,6 +109,10 @@ public class ResultPartitionDeploymentDescriptor implements Serializable {
 
 	public int getNumberOfSubpartitions() {
 		return numberOfSubpartitions;
+	}
+
+	public int getNumberOfConsumers() {
+		return numberOfConsumers;
 	}
 
 	/**
@@ -142,6 +167,6 @@ public class ResultPartitionDeploymentDescriptor implements Serializable {
 
 		return new ResultPartitionDeploymentDescriptor(
 				resultId, partitionId, partitionType, numberOfSubpartitions,
-				partition.getIntermediateResult().getEagerlyDeployConsumers());
+				partition.getIntermediateResult().getEagerlyDeployConsumers(), partition.getConsumers().size());
 	}
 }
