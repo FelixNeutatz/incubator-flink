@@ -1134,7 +1134,7 @@ public class JobGraphGenerator implements Visitor<PlanNode> {
 
 		if (distributionPattern == DistributionPattern.BROADCAST) {
 			System.err.println("changed to blocking");
-			resultType = ResultPartitionType.BLOCKING_BROADCAST;
+			resultType = ResultPartitionType.BLOCKING;
 		}
 
 		JobEdge edge = targetVertex.connectNewDataSetAsInput(sourceVertex, distributionPattern, resultType);

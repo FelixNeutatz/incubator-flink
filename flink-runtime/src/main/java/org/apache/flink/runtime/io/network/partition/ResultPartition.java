@@ -156,15 +156,7 @@ public class ResultPartition implements BufferPoolOwner {
 			case BLOCKING:
 				for (int i = 0; i < subpartitions.length; i++) {
 					subpartitions[i] = new SpillableSubpartition(
-							i, this, ioManager, defaultIoMode, false);
-				}
-
-				break;
-
-			case BLOCKING_BROADCAST:
-				for (int i = 0; i < subpartitions.length; i++) {
-					subpartitions[i] = new SpillableSubpartition(
-						i, this, ioManager, defaultIoMode, true);
+							i, this, ioManager, defaultIoMode);
 				}
 
 				break;
@@ -215,15 +207,7 @@ public class ResultPartition implements BufferPoolOwner {
 			case BLOCKING:
 				for (int i = 0; i < subpartitions.length; i++) {
 					subpartitions[i] = new SpillableSubpartition(
-						i, this, ioManager, defaultIoMode, false);
-				}
-
-				break;
-
-			case BLOCKING_BROADCAST:
-				for (int i = 0; i < subpartitions.length; i++) {
-					subpartitions[i] = new SpillableSubpartition(
-						i, this, ioManager, defaultIoMode, true);
+						i, this, ioManager, defaultIoMode);
 				}
 
 				break;

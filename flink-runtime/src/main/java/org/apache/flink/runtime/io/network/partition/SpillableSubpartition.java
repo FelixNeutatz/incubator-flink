@@ -68,10 +68,6 @@ class SpillableSubpartition extends ResultSubpartition {
 
 	private final Object lock = new Object();
 	private AtomicInteger releaseRequests;
-	
-	private long id;
-	
-	private boolean isBroadcast;
 
 	SpillableSubpartition(int index, ResultPartition parent, IOManager ioManager, IOMode ioMode) {
 		super(index, parent);
@@ -82,25 +78,6 @@ class SpillableSubpartition extends ResultSubpartition {
 		this.readViews = new ConcurrentLinkedQueue<ResultSubpartitionView>();
 		
 		this.releaseRequests = new AtomicInteger(0);
-		
-		this.id = System.nanoTime();
-
-		this.isBroadcast = false;
-	}
-
-	SpillableSubpartition(int index, ResultPartition parent, IOManager ioManager, IOMode ioMode, boolean isBroadcast) {
-		super(index, parent);
-
-		this.ioManager = checkNotNull(ioManager);
-		this.ioMode = checkNotNull(ioMode);
-
-		this.readViews = new ConcurrentLinkedQueue<ResultSubpartitionView>();
-
-		this.releaseRequests = new AtomicInteger(0);
-
-		this.id = System.nanoTime();
-		
-		this.isBroadcast = isBroadcast;
 	}
 
 	@Override
@@ -142,12 +119,8 @@ class SpillableSubpartition extends ResultSubpartition {
 
 	@Override
 	protected void onConsumedSubpartition() {
-		if (isBroadcast) {
-			if (releaseRequests.addAndGet(1) >= parent.getNumberOfConsumers()) {
-				parent.onConsumedSubpartition(index);
-			}
-		} else {
-			super.onConsumedSubpartition();
+		if (releaseRequests.addAndGet(1) >= parent.getNumberOfConsumers()) {
+			parent.onConsumedSubpartition(index);
 		}
 	}
 	

@@ -21,7 +21,6 @@ package org.apache.flink.runtime.io.network.partition;
 public enum ResultPartitionType {
 
 	BLOCKING(true, false, false),
-	BLOCKING_BROADCAST(true, false, false),
 
 	PIPELINED(false, true, true),
 
