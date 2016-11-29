@@ -106,6 +106,8 @@ public class BroadcastVariableMaterialization<T, C> {
 			
 			if (materializer) {
 				subpartitionIndex = ((SingleInputGate)((AbstractReader)reader).inputGate).consumedSubpartitionIndex;
+				
+				System.err.println("current subpartition index: " + subpartitionIndex);
 
 				// first one, so we need to materialize;
 				if (LOG.isDebugEnabled()) {
@@ -117,16 +119,17 @@ public class BroadcastVariableMaterialization<T, C> {
 				T element;
 				while ((element = readerIterator.next()) != null) {
 					data.add(element);
+					System.err.println(element);
 				}
 				
-				/*
-				System.err.print("data: " + data.size() + " ");
+				
+				System.err.print("superstep: " + key + "data: " + data.size() + " ");
 				
 				for (T e: data){
 					System.err.print(e + ", ");
 				}
 				System.err.println("");
-				*/
+				
 				
 				
 				synchronized (materializationMonitor) {
@@ -140,11 +143,18 @@ public class BroadcastVariableMaterialization<T, C> {
 				}
 			}
 			else {
+				/*
 				if (((SingleInputGate)((AbstractReader)reader).inputGate).consumedSubpartitionIndex == subpartitionIndex) {
 					((SingleInputGate) ((AbstractReader) reader).inputGate).notifySubpartitionConsumed();
 				} else {
 					T element = serializer.createInstance();
 					while ((element = readerIterator.next(element)) != null);
+				}*/
+
+				((SingleInputGate) ((AbstractReader) reader).inputGate).notifySubpartitionConsumed();
+				
+				for (int i = 0; i < ((SingleInputGate) ((AbstractReader) reader).inputGate).getNumberOfInputChannels(); i++) {
+					((AbstractReader) reader).incrementEndOfSuperstepEventAndCheck();
 				}
 
 				// successor: discard all data and refer to the shared variable
@@ -170,6 +180,11 @@ public class BroadcastVariableMaterialization<T, C> {
 				throw new IOException("Materialization of the broadcast variable failed.", t);
 			}
 		}
+
+		/*
+		if (((AbstractReader) reader).isIterative) {
+			((AbstractReader) reader).currentNumberOfEndOfSuperstepEvents = ((SingleInputGate) ((AbstractReader) reader).inputGate).getNumberOfInputChannels();
+		}*/
 	}
 	
 	public boolean decrementReference(BatchTask<?, ?> referenceHolder) {

@@ -28,7 +28,9 @@ import org.apache.flink.api.java.functions.FunctionAnnotation.ForwardedFields;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.ParameterTool;
+import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.examples.java.clustering.util.KMeansData;
 import org.apache.flink.api.java.DataSet;
 import org.apache.flink.api.java.ExecutionEnvironment;
@@ -83,8 +85,22 @@ public class KMeans {
 		// Checking input parameters
 		final ParameterTool params = ParameterTool.fromArgs(args);
 
+		
+		
+		Configuration conf = new Configuration();
+		conf.setInteger(ConfigConstants.LOCAL_NUMBER_TASK_MANAGER, 2);
+		conf.setInteger(ConfigConstants.TASK_MANAGER_NUM_TASK_SLOTS, 2);
+		conf.setString(ConfigConstants.AKKA_ASK_TIMEOUT, "2 h");
+		
+
+		
 		// set up execution environment
-		ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
+		ExecutionEnvironment env = ExecutionEnvironment.createLocalEnvironment(conf);
+		env.setParallelism(4);
+		 
+
+		// set up execution environment
+		//ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
 		env.getConfig().setGlobalJobParameters(params); // make parameters available in the web interface
 
 		// get input data:
@@ -119,8 +135,15 @@ public class KMeans {
 			env.execute("KMeans Example");
 		} else {
 			System.out.println("Printing result to stdout. Use --output to specify output path.");
-			clusteredPoints.print();
+			//clusteredPoints.print();
+
+			clusteredPoints.writeAsCsv("test", "\n", " ", FileSystem.WriteMode.OVERWRITE);
+			
+			System.err.println(env.getExecutionPlan());
+
+			env.execute();
 		}
+		
 	}
 
 	// *************************************************************************

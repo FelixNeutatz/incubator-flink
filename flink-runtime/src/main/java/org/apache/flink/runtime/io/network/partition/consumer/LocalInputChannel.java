@@ -105,6 +105,7 @@ public class LocalInputChannel extends InputChannel implements NotificationListe
 				try {
 					subpartitionView = partitionManager.createSubpartitionView(
 							partitionId, subpartitionIndex, inputGate.getBufferProvider());
+					System.err.println(subpartitionView + " index: " + subpartitionIndex);
 				}
 				catch (PartitionNotFoundException notFound) {
 					if (increaseBackoff()) {
@@ -150,7 +151,11 @@ public class LocalInputChannel extends InputChannel implements NotificationListe
 	Buffer getNextBuffer() throws IOException, InterruptedException {
 		checkError();
 		checkState(subpartitionView != null, "Queried for a buffer before requesting the subpartition.");
-
+		
+		if (subpartitionView == null) {
+			System.err.println("hier ist der fehlerteufel");
+		}
+		
 		// After subscribe notification
 		if (lookAhead == null) {
 			lookAhead = subpartitionView.getNextBuffer();
@@ -216,6 +221,7 @@ public class LocalInputChannel extends InputChannel implements NotificationListe
 
 			if (subpartitionView != null) {
 				subpartitionView.releaseAllResources();
+				System.out.println("released subpartition already");
 				subpartitionView = null;
 			}
 

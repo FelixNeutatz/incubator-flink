@@ -42,7 +42,7 @@ public abstract class AbstractReader implements ReaderBase {
 	private final TaskEventHandler taskEventHandler = new TaskEventHandler();
 
 	/** Flag indicating whether this reader allows iteration events. */
-	private boolean isIterative;
+	public boolean isIterative;
 
 	/**
 	 * The current number of end of superstep events (reset for each superstep). A superstep is
@@ -91,6 +91,7 @@ public abstract class AbstractReader implements ReaderBase {
 				return true;
 			}
 			else if (eventType == EndOfSuperstepEvent.class) {
+				System.err.println("superstep increment");
 				return incrementEndOfSuperstepEventAndCheck();
 			}
 
@@ -141,10 +142,12 @@ public abstract class AbstractReader implements ReaderBase {
 		return false;
 	}
 
-	private boolean incrementEndOfSuperstepEventAndCheck() {
+	public boolean incrementEndOfSuperstepEventAndCheck() {
 		checkState(isIterative, "Tried to increment superstep count in a non-iterative reader.");
 		checkState(currentNumberOfEndOfSuperstepEvents + 1 <= inputGate.getNumberOfInputChannels(), "Received too many (" + currentNumberOfEndOfSuperstepEvents + ") end of superstep events.");
 
+		System.err.println("supersteps: " + (currentNumberOfEndOfSuperstepEvents+1) + " == " + inputGate.getNumberOfInputChannels());
+		
 		return ++currentNumberOfEndOfSuperstepEvents == inputGate.getNumberOfInputChannels();
 	}
 
