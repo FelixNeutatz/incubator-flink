@@ -484,120 +484,118 @@ public class Execution implements AccessExecution, Archiveable<ArchivedExecution
 	void scheduleOrUpdateConsumers(List<List<ExecutionEdge>> allConsumers) {
 		final int numConsumers = allConsumers.size();
 
-		if (numConsumers > 1) {
-			fail(new IllegalStateException("Currently, only a single consumer group per partition is supported."));
-		}
-		else if (numConsumers == 0) {
+		if (numConsumers == 0) {
 			return;
 		}
+		for (int groupi = 0; groupi < allConsumers.size(); groupi++) {
+			for (ExecutionEdge edge : allConsumers.get(groupi)) {
+				final ExecutionVertex consumerVertex = edge.getTarget();
 
-		for (ExecutionEdge edge : allConsumers.get(0)) {
-			final ExecutionVertex consumerVertex = edge.getTarget();
+				final Execution consumer = consumerVertex.getCurrentExecutionAttempt();
+				final ExecutionState consumerState = consumer.getState();
 
-			final Execution consumer = consumerVertex.getCurrentExecutionAttempt();
-			final ExecutionState consumerState = consumer.getState();
+				final IntermediateResultPartition partition = edge.getSource();
 
-			final IntermediateResultPartition partition = edge.getSource();
-
-			// ----------------------------------------------------------------
-			// Consumer is created => try to deploy and cache input channel
-			// descriptors if there is a deployment race
-			// ----------------------------------------------------------------
-			if (consumerState == CREATED) {
-				final Execution partitionExecution = partition.getProducer()
+				// ----------------------------------------------------------------
+				// Consumer is created => try to deploy and cache input channel
+				// descriptors if there is a deployment race
+				// ----------------------------------------------------------------
+				if (consumerState == CREATED) {
+					final Execution partitionExecution = partition.getProducer()
 						.getCurrentExecutionAttempt();
 
-				consumerVertex.cachePartitionInfo(PartialInputChannelDeploymentDescriptor.fromEdge(
+					consumerVertex.cachePartitionInfo(PartialInputChannelDeploymentDescriptor.fromEdge(
 						partition, partitionExecution));
 
-				// When deploying a consuming task, its task deployment descriptor will contain all
-				// deployment information available at the respective time. It is possible that some
-				// of the partitions to be consumed have not been created yet. These are updated
-				// runtime via the update messages.
-				//
-				// TODO The current approach may send many update messages even though the consuming
-				// task has already been deployed with all necessary information. We have to check
-				// whether this is a problem and fix it, if it is.
-				FlinkFuture.supplyAsync(new Callable<Void>(){
-					@Override
-					public Void call() throws Exception {
-						try {
-							consumerVertex.scheduleForExecution(
+					// When deploying a consuming task, its task deployment descriptor will contain all
+					// deployment information available at the respective time. It is possible that some
+					// of the partitions to be consumed have not been created yet. These are updated
+					// runtime via the update messages.
+					//
+					// TODO The current approach may send many update messages even though the consuming
+					// task has already been deployed with all necessary information. We have to check
+					// whether this is a problem and fix it, if it is.
+					FlinkFuture.supplyAsync(new Callable<Void>() {
+						@Override
+						public Void call() throws Exception {
+							try {
+								consumerVertex.scheduleForExecution(
 									consumerVertex.getExecutionGraph().getSlotProvider(),
 									consumerVertex.getExecutionGraph().isQueuedSchedulingAllowed());
-						} catch (Throwable t) {
-							consumerVertex.fail(new IllegalStateException("Could not schedule consumer " +
+							} catch (Throwable t) {
+								consumerVertex.fail(new IllegalStateException("Could not schedule consumer " +
 									"vertex " + consumerVertex, t));
+							}
+
+							return null;
 						}
-
-						return null;
-					}
-				}, executor);
-
-				// double check to resolve race conditions
-				if(consumerVertex.getExecutionState() == RUNNING){
-					consumerVertex.sendPartitionInfos();
-				}
-			}
-			// ----------------------------------------------------------------
-			// Consumer is running => send update message now
-			// ----------------------------------------------------------------
-			else {
-				if (consumerState == RUNNING) {
-					final SimpleSlot consumerSlot = consumer.getAssignedResource();
-
-					if (consumerSlot == null) {
-						// The consumer has been reset concurrently
-						continue;
-					}
-
-					final TaskManagerLocation partitionTaskManagerLocation = partition.getProducer()
-							.getCurrentAssignedResource().getTaskManagerLocation();
-					final ResourceID partitionTaskManager = partitionTaskManagerLocation.getResourceID();
-					
-					final ResourceID consumerTaskManager = consumerSlot.getTaskManagerID();
-
-					final ResultPartitionID partitionId = new ResultPartitionID(partition.getPartitionId(), attemptId);
-					
-
-					final ResultPartitionLocation partitionLocation;
-
-					if (consumerTaskManager.equals(partitionTaskManager)) {
-						// Consuming task is deployed to the same instance as the partition => local
-						partitionLocation = ResultPartitionLocation.createLocal();
-					}
-					else {
-						// Different instances => remote
-						final ConnectionID connectionId = new ConnectionID(
-								partitionTaskManagerLocation,
-								partition.getIntermediateResult().getConnectionIndex());
-
-						partitionLocation = ResultPartitionLocation.createRemote(connectionId);
-					}
-
-					final InputChannelDeploymentDescriptor descriptor = new InputChannelDeploymentDescriptor(
-							partitionId, partitionLocation);
-
-					consumer.sendUpdatePartitionInfoRpcCall(
-						Collections.singleton(
-							new PartitionInfo(
-								partition.getIntermediateResult().getId(),
-								descriptor)));
-				}
-				// ----------------------------------------------------------------
-				// Consumer is scheduled or deploying => cache input channel
-				// deployment descriptors and send update message later
-				// ----------------------------------------------------------------
-				else if (consumerState == SCHEDULED || consumerState == DEPLOYING) {
-					final Execution partitionExecution = partition.getProducer()
-							.getCurrentExecutionAttempt();
-
-					consumerVertex.cachePartitionInfo(PartialInputChannelDeploymentDescriptor
-							.fromEdge(partition, partitionExecution));
+					}, executor);
 
 					// double check to resolve race conditions
 					if (consumerVertex.getExecutionState() == RUNNING) {
 						consumerVertex.sendPartitionInfos();
+					}
+				}
+				// ----------------------------------------------------------------
+				// Consumer is running => send update message now
+				// ----------------------------------------------------------------
+				else {
+					if (consumerState == RUNNING) {
+						final SimpleSlot consumerSlot = consumer.getAssignedResource();
+
+						if (consumerSlot == null) {
+							// The consumer has been reset concurrently
+							continue;
+						}
+
+						final TaskManagerLocation partitionTaskManagerLocation = partition.getProducer()
+							.getCurrentAssignedResource().getTaskManagerLocation();
+						final ResourceID partitionTaskManager = partitionTaskManagerLocation.getResourceID();
+
+						final ResourceID consumerTaskManager = consumerSlot.getTaskManagerID();
+
+						final ResultPartitionID partitionId = new ResultPartitionID(partition.getPartitionId(), attemptId);
+						
+
+
+						final ResultPartitionLocation partitionLocation;
+
+						if (consumerTaskManager.equals(partitionTaskManager)) {
+							// Consuming task is deployed to the same instance as the partition => local
+							partitionLocation = ResultPartitionLocation.createLocal();
+						} else {
+							// Different instances => remote
+							final ConnectionID connectionId = new ConnectionID(
+								partitionTaskManagerLocation,
+								partition.getIntermediateResult().getConnectionIndex());
+
+							partitionLocation = ResultPartitionLocation.createRemote(connectionId);
+						}
+
+						final InputChannelDeploymentDescriptor descriptor = new InputChannelDeploymentDescriptor(
+							partitionId, partitionLocation);
+
+						consumer.sendUpdatePartitionInfoRpcCall(
+							Collections.singleton(
+								new PartitionInfo(
+									partition.getIntermediateResult().getId(),
+									descriptor)));
+					}
+					// ----------------------------------------------------------------
+					// Consumer is scheduled or deploying => cache input channel
+					// deployment descriptors and send update message later
+					// ----------------------------------------------------------------
+					else if (consumerState == SCHEDULED || consumerState == DEPLOYING) {
+						final Execution partitionExecution = partition.getProducer()
+							.getCurrentExecutionAttempt();
+
+						consumerVertex.cachePartitionInfo(PartialInputChannelDeploymentDescriptor
+							.fromEdge(partition, partitionExecution));
+
+						// double check to resolve race conditions
+						if (consumerVertex.getExecutionState() == RUNNING) {
+							consumerVertex.sendPartitionInfos();
+						}
 					}
 				}
 			}

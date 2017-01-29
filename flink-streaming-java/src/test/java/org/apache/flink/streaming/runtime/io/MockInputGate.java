@@ -24,6 +24,7 @@ import org.apache.flink.runtime.io.network.partition.consumer.BufferOrEvent;
 import org.apache.flink.runtime.io.network.partition.consumer.InputGate;
 import org.apache.flink.runtime.io.network.partition.consumer.InputGateListener;
 
+import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Queue;
@@ -93,4 +94,12 @@ public class MockInputGate implements InputGate {
 	public void registerListener(InputGateListener listener) {
 	}
 
+	@Override
+	public void notifySubpartitionConsumed() throws IOException, InterruptedException {
+	}
+
+	@Override
+	public int getConsumedSubpartitionIndex() {
+		return -1;
+	}
 }

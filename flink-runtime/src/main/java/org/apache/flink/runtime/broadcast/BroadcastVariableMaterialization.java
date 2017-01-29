@@ -27,6 +27,7 @@ import java.util.Set;
 import org.apache.flink.api.common.functions.BroadcastVariableInitializer;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.common.typeutils.TypeSerializerFactory;
+import org.apache.flink.runtime.io.network.api.reader.AbstractReader;
 import org.apache.flink.runtime.io.network.api.reader.MutableReader;
 import org.apache.flink.runtime.operators.BatchTask;
 import org.apache.flink.runtime.operators.util.ReaderIterator;
@@ -56,6 +57,8 @@ public class BroadcastVariableMaterialization<T, C> {
 	private boolean materialized;
 	
 	private boolean disposed;
+
+	private int subpartitionIndex;
 	
 	
 	public BroadcastVariableMaterialization(BroadcastVariableKey key) {
@@ -105,6 +108,8 @@ public class BroadcastVariableMaterialization<T, C> {
 				if (LOG.isDebugEnabled()) {
 					LOG.debug("Getting Broadcast Variable (" + key + ") - First access, materializing.");
 				}
+
+				subpartitionIndex = ((AbstractReader)reader).getConsumedSubpartitionIndex();
 				
 				ArrayList<T> data = new ArrayList<T>();
 				
@@ -129,9 +134,13 @@ public class BroadcastVariableMaterialization<T, C> {
 				if (LOG.isDebugEnabled()) {
 					LOG.debug("Getting Broadcast Variable (" + key + ") - shared access.");
 				}
-				
-				T element = serializer.createInstance();
-				while ((element = readerIterator.next(element)) != null);
+
+				if (((AbstractReader)reader).getConsumedSubpartitionIndex() == subpartitionIndex) {
+					((AbstractReader) reader).notifySubpartitionConsumed();
+				} else {
+					T element = serializer.createInstance();
+					while ((element = readerIterator.next(element)) != null);
+				}
 				
 				synchronized (materializationMonitor) {
 					while (!this.materialized && !disposed) {

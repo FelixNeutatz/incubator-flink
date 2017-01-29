@@ -47,6 +47,9 @@ public class ResultPartitionDeploymentDescriptor implements Serializable {
 
 	/** The number of subpartitions. */
 	private final int numberOfSubpartitions;
+
+	/** The number of consumers. */
+	private final int numberOfConsumers;
 	
 	/** Flag whether the result partition should send scheduleOrUpdateConsumer messages. */
 	private final boolean sendScheduleOrUpdateConsumersMessage;
@@ -64,6 +67,25 @@ public class ResultPartitionDeploymentDescriptor implements Serializable {
 
 		checkArgument(numberOfSubpartitions >= 1);
 		this.numberOfSubpartitions = numberOfSubpartitions;
+		this.numberOfConsumers = 1;
+		this.sendScheduleOrUpdateConsumersMessage = lazyScheduling;
+	}
+
+	public ResultPartitionDeploymentDescriptor(
+		IntermediateDataSetID resultId,
+		IntermediateResultPartitionID partitionId,
+		ResultPartitionType partitionType,
+		int numberOfSubpartitions,
+		int numberOfConsumers,
+		boolean lazyScheduling) {
+
+		this.resultId = checkNotNull(resultId);
+		this.partitionId = checkNotNull(partitionId);
+		this.partitionType = checkNotNull(partitionType);
+
+		checkArgument(numberOfSubpartitions >= 1);
+		this.numberOfSubpartitions = numberOfSubpartitions;
+		this.numberOfConsumers = numberOfConsumers;
 		this.sendScheduleOrUpdateConsumersMessage = lazyScheduling;
 	}
 
@@ -81,6 +103,10 @@ public class ResultPartitionDeploymentDescriptor implements Serializable {
 
 	public int getNumberOfSubpartitions() {
 		return numberOfSubpartitions;
+	}
+
+	public int getNumberOfConsumers() {
+		return numberOfConsumers;
 	}
 
 	public boolean sendScheduleOrUpdateConsumersMessage() {
@@ -109,15 +135,10 @@ public class ResultPartitionDeploymentDescriptor implements Serializable {
 		int numberOfSubpartitions = 1;
 
 		if (!partition.getConsumers().isEmpty() && !partition.getConsumers().get(0).isEmpty()) {
-
-			if (partition.getConsumers().size() > 1) {
-				throw new IllegalStateException("Currently, only a single consumer group per partition is supported.");
-			}
-
 			numberOfSubpartitions = partition.getConsumers().get(0).size();
 		}
 
 		return new ResultPartitionDeploymentDescriptor(
-				resultId, partitionId, partitionType, numberOfSubpartitions, lazyScheduling);
+				resultId, partitionId, partitionType, numberOfSubpartitions, partition.getConsumers().size(), lazyScheduling);
 	}
 }

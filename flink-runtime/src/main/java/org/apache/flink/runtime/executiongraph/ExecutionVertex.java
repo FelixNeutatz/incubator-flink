@@ -295,6 +295,10 @@ public class ExecutionVertex implements AccessExecutionVertex, Archiveable<Archi
 				edges = connectAllToAll(sourcePartitions, inputNumber);
 				break;
 
+			case BROADCAST:
+				edges = connectAllToAll(sourcePartitions, inputNumber);
+				break;
+
 			default:
 				throw new RuntimeException("Unrecognized distribution pattern.");
 
@@ -305,8 +309,14 @@ public class ExecutionVertex implements AccessExecutionVertex, Archiveable<Archi
 		// add the consumers to the source
 		// for now (until the receiver initiated handshake is in place), we need to register the
 		// edges as the execution graph
-		for (ExecutionEdge ee : edges) {
-			ee.getSource().addConsumer(ee, consumerNumber);
+		for (int ei = 0; ei < edges.length; ei++) {
+			ExecutionEdge ee = edges[ei];
+
+			if (pattern == DistributionPattern.BROADCAST) {
+				ee.getSource().addBroadcastConsumer(ee);
+			} else {
+				ee.getSource().addConsumer(ee, consumerNumber);
+			}
 		}
 	}
 

@@ -751,7 +751,10 @@ public class JobGraphGenerator implements Visitor<PlanNode> {
 	private int getNumberOfSendersPerReceiver(DistributionPattern pattern, int numSenders, int numReceivers) {
 		if (pattern == DistributionPattern.ALL_TO_ALL) {
 			return numSenders;
-		} else if (pattern == DistributionPattern.POINTWISE) {
+		} else if (pattern == DistributionPattern.BROADCAST) {
+			return 1;
+		}
+		else if (pattern == DistributionPattern.POINTWISE) {
 			if (numSenders != numReceivers) {
 				if (numReceivers == 1) {
 					return numSenders;
@@ -1085,8 +1088,15 @@ public class JobGraphGenerator implements Visitor<PlanNode> {
 			case FORWARD:
 				distributionPattern = DistributionPattern.POINTWISE;
 				break;
-			case PARTITION_RANDOM:
 			case BROADCAST:
+				if (channel.getSource().isOnDynamicPath()) {
+					distributionPattern = DistributionPattern.ALL_TO_ALL;
+				} else {
+					distributionPattern = DistributionPattern.BROADCAST;
+					channel.setDataExchangeMode(DataExchangeMode.BATCH);
+				}
+				break;
+			case PARTITION_RANDOM:
 			case PARTITION_HASH:
 			case PARTITION_CUSTOM:
 			case PARTITION_RANGE:

@@ -132,6 +132,10 @@ public abstract class AbstractReader implements ReaderBase {
 		currentNumberOfEndOfSuperstepEvents = 0;
 	}
 
+	public int getConsumedSubpartitionIndex() {
+		return inputGate.getConsumedSubpartitionIndex();
+	}
+
 	@Override
 	public boolean hasReachedEndOfSuperstep() {
 		if (isIterative) {
@@ -146,6 +150,10 @@ public abstract class AbstractReader implements ReaderBase {
 		checkState(currentNumberOfEndOfSuperstepEvents + 1 <= inputGate.getNumberOfInputChannels(), "Received too many (" + currentNumberOfEndOfSuperstepEvents + ") end of superstep events.");
 
 		return ++currentNumberOfEndOfSuperstepEvents == inputGate.getNumberOfInputChannels();
+	}
+
+	public void notifySubpartitionConsumed() throws IOException, InterruptedException {
+		inputGate.notifySubpartitionConsumed();
 	}
 
 }

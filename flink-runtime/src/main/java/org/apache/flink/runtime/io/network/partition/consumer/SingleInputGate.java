@@ -162,6 +162,8 @@ public class SingleInputGate implements InputGate {
 	/** A timer to retrigger local partition requests. Only initialized if actually needed. */
 	private Timer retriggerLocalRequestTimer;
 
+	private final Object monitor = new Object();
+
 	public SingleInputGate(
 		String owningTaskName,
 		JobID jobId,
@@ -310,6 +312,31 @@ public class SingleInputGate implements InputGate {
 				if (--numberOfUninitializedChannels == 0) {
 					pendingEvents.clear();
 				}
+
+				synchronized (monitor) {
+					monitor.notifyAll();
+				}
+			}
+		}
+	}
+
+	public void notifySubpartitionConsumed() throws IOException, InterruptedException {
+		requestPartitions();
+
+		BitSet isInputChannelReleased = new BitSet(inputChannels.size());
+		while(isInputChannelReleased.cardinality() < inputChannels.size()) {
+			for (int i = 0; i < inputChannels.size(); i++) {
+				InputChannel inputChannel = (InputChannel) inputChannels.values().toArray()[i];
+				if (inputChannel.getClass() != UnknownInputChannel.class && !isInputChannelReleased.get(i)) {
+					inputChannel.notifySubpartitionConsumed();
+					inputChannel.releaseAllResources();
+					isInputChannelReleased.set(i);
+				}
+			}
+			if (isInputChannelReleased.cardinality() < inputChannels.size()) {
+				synchronized (monitor) {
+					monitor.wait();
+				}
 			}
 		}
 	}
@@ -398,6 +425,11 @@ public class SingleInputGate implements InputGate {
 		}
 
 		return true;
+	}
+	
+	@Override
+	public int getConsumedSubpartitionIndex() {
+		return consumedSubpartitionIndex;
 	}
 
 	@Override

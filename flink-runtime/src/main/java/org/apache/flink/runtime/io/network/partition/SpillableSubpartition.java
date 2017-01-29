@@ -31,6 +31,8 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayDeque;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -73,13 +75,17 @@ class SpillableSubpartition extends ResultSubpartition {
 	/** Flag indicating whether the subpartition has been released. */
 	private volatile boolean isReleased;
 
-	/** The read view to consume this subpartition. */
-	private ResultSubpartitionView readView;
+	/** The read views to consume this subpartition. */
+	private ConcurrentLinkedQueue<ResultSubpartitionView> readViews;
+
+	private AtomicInteger releaseRequests;
 
 	SpillableSubpartition(int index, ResultPartition parent, IOManager ioManager) {
 		super(index, parent);
 
 		this.ioManager = checkNotNull(ioManager);
+		this.readViews = new ConcurrentLinkedQueue<ResultSubpartitionView>();
+		this.releaseRequests = new AtomicInteger(0);
 	}
 
 	@Override
@@ -110,6 +116,13 @@ class SpillableSubpartition extends ResultSubpartition {
 	}
 
 	@Override
+	protected void onConsumedSubpartition() {
+		if (releaseRequests.addAndGet(1) >= parent.getNumberOfConsumers()) {
+			parent.onConsumedSubpartition(index);
+		}
+	}
+
+	@Override
 	public void finish() throws IOException {
 		synchronized (buffers) {
 			if (add(EventSerializer.toBuffer(EndOfPartitionEvent.INSTANCE))) {
@@ -125,19 +138,19 @@ class SpillableSubpartition extends ResultSubpartition {
 
 	@Override
 	public void release() throws IOException {
-		final ResultSubpartitionView view;
+		final ConcurrentLinkedQueue<ResultSubpartitionView> views;
 
 		synchronized (buffers) {
 			if (isReleased) {
 				return;
 			}
 
-			view = readView;
+			views = readViews;
 
 			// No consumer yet, we are responsible to clean everything up. If
 			// one is available, the view is responsible is to clean up (see
 			// below).
-			if (view == null) {
+			if (views == null) {
 				for (Buffer buffer : buffers) {
 					buffer.recycle();
 				}
@@ -155,9 +168,13 @@ class SpillableSubpartition extends ResultSubpartition {
 			isReleased = true;
 		}
 
-		if (view != null) {
-			view.releaseAllResources();
+		for (final ResultSubpartitionView view: views) {
+			// Release the view outside of the synchronized block
+			if (view != null) {
+				//view.releaseAllResources();
+			}
 		}
+		views.clear();
 	}
 
 	@Override
@@ -169,10 +186,7 @@ class SpillableSubpartition extends ResultSubpartition {
 					"been finished.");
 			}
 
-			if (readView != null) {
-				throw new IllegalStateException("Subpartition is being or already has been " +
-					"consumed, but we currently allow subpartitions to only be consumed once.");
-			}
+			ResultSubpartitionView readView = null;
 
 			if (spillWriter != null) {
 				readView = new SpilledSubpartitionView(
@@ -190,6 +204,8 @@ class SpillableSubpartition extends ResultSubpartition {
 					availabilityListener);
 			}
 
+			readViews.add(readView);
+
 			return readView;
 		}
 	}
@@ -197,30 +213,31 @@ class SpillableSubpartition extends ResultSubpartition {
 	@Override
 	public int releaseMemory() throws IOException {
 		synchronized (buffers) {
-			ResultSubpartitionView view = readView;
+			for (ResultSubpartitionView view : readViews) {
+				if (view != null && view.getClass() == SpillableSubpartitionView.class) {
+					// If there is a spilalble view, it's the responsibility of the
+					// view to release memory.
+					SpillableSubpartitionView spillableView = (SpillableSubpartitionView) view;
+					return spillableView.releaseMemory();
+				} else if (spillWriter == null) {
+					// No view and in-memory => spill to disk
+					spillWriter = ioManager.createBufferFileWriter(ioManager.createChannel());
 
-			if (view != null && view.getClass() == SpillableSubpartitionView.class) {
-				// If there is a spilalble view, it's the responsibility of the
-				// view to release memory.
-				SpillableSubpartitionView spillableView = (SpillableSubpartitionView) view;
-				return spillableView.releaseMemory();
-			} else if (spillWriter == null) {
-				// No view and in-memory => spill to disk
-				spillWriter = ioManager.createBufferFileWriter(ioManager.createChannel());
+					int numberOfBuffers = buffers.size();
+					long spilledBytes = 0;
 
-				int numberOfBuffers = buffers.size();
-				long spilledBytes = 0;
+					// Spill all buffers
+					for (int i = 0; i < numberOfBuffers; i++) {
+						Buffer buffer = buffers.remove();
+						spilledBytes += buffer.getSize();
+						spillWriter.writeBlock(buffer);
+					}
 
-				// Spill all buffers
-				for (int i = 0; i < numberOfBuffers; i++) {
-					Buffer buffer = buffers.remove();
-					spilledBytes += buffer.getSize();
-					spillWriter.writeBlock(buffer);
+					LOG.debug("Spilling {} bytes for sub partition {} of {}.", spilledBytes, index, parent.getPartitionId());
+					
+
+					return numberOfBuffers;
 				}
-
-				LOG.debug("Spilling {} bytes for sub partition {} of {}.", spilledBytes, index, parent.getPartitionId());
-
-				return numberOfBuffers;
 			}
 		}
 
@@ -242,7 +259,7 @@ class SpillableSubpartition extends ResultSubpartition {
 	public String toString() {
 		return String.format("SpillableSubpartition [%d number of buffers (%d bytes)," +
 						"finished? %s, read view? %s, spilled? %s]",
-				getTotalNumberOfBuffers(), getTotalNumberOfBytes(), isFinished, readView != null,
+				getTotalNumberOfBuffers(), getTotalNumberOfBytes(), isFinished, readViews.size() != 0,
 				spillWriter != null);
 	}
 

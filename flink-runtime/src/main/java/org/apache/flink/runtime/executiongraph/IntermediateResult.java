@@ -150,6 +150,13 @@ public class IntermediateResult {
 		return index;
 	}
 
+	public int registerBroadcastConsumer() {
+		final int index = numConsumers;
+		numConsumers++;
+
+		return index;
+	}
+
 	public int getConnectionIndex() {
 		return connectionIndex;
 	}

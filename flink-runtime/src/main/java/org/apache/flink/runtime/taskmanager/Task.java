@@ -343,6 +343,7 @@ public class Task implements Runnable, TaskActions {
 				partitionId,
 				desc.getPartitionType(),
 				desc.getNumberOfSubpartitions(),
+				desc.getNumberOfConsumers(),
 				networkEnvironment.getResultPartitionManager(),
 				resultPartitionConsumableNotifier,
 				ioManager,

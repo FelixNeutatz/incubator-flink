@@ -38,5 +38,12 @@ public enum DistributionPattern {
 	 * <p>
 	 * {@link ExecutionVertex#connectPointwise(org.apache.flink.runtime.executiongraph.IntermediateResultPartition[], int)}
 	 */
-	POINTWISE
+	POINTWISE,
+
+	/**
+	 * Each producing sub task is connected to each sub task of the consuming task.
+	 * <p>
+	 * {@link ExecutionVertex#connectAllToAll(org.apache.flink.runtime.executiongraph.IntermediateResultPartition[], int)}
+	 */
+	BROADCAST
 }

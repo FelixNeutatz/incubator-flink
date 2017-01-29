@@ -75,17 +75,26 @@ public class IntermediateResultPartition {
 	int addConsumerGroup() {
 		int pos = consumers.size();
 
-		// NOTE: currently we support only one consumer per result!!!
-		if (pos != 0) {
-			throw new RuntimeException("Currently, each intermediate result can only have one consumer.");
-		}
-
 		consumers.add(new ArrayList<ExecutionEdge>());
 		return pos;
 	}
 
 	void addConsumer(ExecutionEdge edge, int consumerNumber) {
 		consumers.get(consumerNumber).add(edge);
+	}
+
+	void addBroadcastConsumer(ExecutionEdge edge) {
+		ArrayList<ExecutionEdge> list = new ArrayList<ExecutionEdge>();
+		list.add(edge);
+
+		for (int i = 0; i < consumers.size(); i++) {
+			if (consumers.get(i).isEmpty()) {
+				consumers.set(i, list);
+				return;
+			}
+		}
+
+		consumers.add(list);
 	}
 
 	boolean markFinished() {

@@ -236,4 +236,15 @@ public class UnionInputGate implements InputGate, InputGateListener {
 			}
 		}
 	}
+
+	public void notifySubpartitionConsumed() throws IOException, InterruptedException {
+		for (InputGate inputGate: inputGates) {
+			inputGate.notifySubpartitionConsumed();
+		}
+	}
+
+	@Override
+	public int getConsumedSubpartitionIndex() {
+		return -1;
+	}
 }

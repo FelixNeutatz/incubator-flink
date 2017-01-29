@@ -91,6 +91,9 @@ public class ResultPartition implements BufferPoolOwner {
 	/** The subpartitions of this partition. At least one. */
 	private final ResultSubpartition[] subpartitions;
 
+	/** The number of consumers of this partition. At least one. */
+	private final int numberOfConsumers;
+
 	private final ResultPartitionManager partitionManager;
 
 	private final ResultPartitionConsumableNotifier partitionConsumableNotifier;
@@ -142,6 +145,57 @@ public class ResultPartition implements BufferPoolOwner {
 		this.partitionId = checkNotNull(partitionId);
 		this.partitionType = checkNotNull(partitionType);
 		this.subpartitions = new ResultSubpartition[numberOfSubpartitions];
+		this.numberOfConsumers = 1;
+		this.partitionManager = checkNotNull(partitionManager);
+		this.partitionConsumableNotifier = checkNotNull(partitionConsumableNotifier);
+		this.sendScheduleOrUpdateConsumersMessage = sendScheduleOrUpdateConsumersMessage;
+
+		// Create the subpartitions.
+		switch (partitionType) {
+			case BLOCKING:
+				for (int i = 0; i < subpartitions.length; i++) {
+					subpartitions[i] = new SpillableSubpartition(i, this, ioManager);
+				}
+
+				break;
+
+			case PIPELINED:
+				for (int i = 0; i < subpartitions.length; i++) {
+					subpartitions[i] = new PipelinedSubpartition(i, this);
+				}
+
+				break;
+
+			default:
+				throw new IllegalArgumentException("Unsupported result partition type.");
+		}
+
+		// Initially, partitions should be consumed once before release.
+		pin();
+
+		LOG.debug("{}: Initialized {}", owningTaskName, this);
+	}
+
+	public ResultPartition(
+		String owningTaskName,
+		TaskActions taskActions, // actions on the owning task
+		JobID jobId,
+		ResultPartitionID partitionId,
+		ResultPartitionType partitionType,
+		int numberOfSubpartitions,
+		int numberOfConsumers,
+		ResultPartitionManager partitionManager,
+		ResultPartitionConsumableNotifier partitionConsumableNotifier,
+		IOManager ioManager,
+		boolean sendScheduleOrUpdateConsumersMessage) {
+
+		this.owningTaskName = checkNotNull(owningTaskName);
+		this.taskActions = checkNotNull(taskActions);
+		this.jobId = checkNotNull(jobId);
+		this.partitionId = checkNotNull(partitionId);
+		this.partitionType = checkNotNull(partitionType);
+		this.subpartitions = new ResultSubpartition[numberOfSubpartitions];
+		this.numberOfConsumers = numberOfConsumers;
 		this.partitionManager = checkNotNull(partitionManager);
 		this.partitionConsumableNotifier = checkNotNull(partitionConsumableNotifier);
 		this.sendScheduleOrUpdateConsumersMessage = sendScheduleOrUpdateConsumersMessage;
@@ -205,6 +259,10 @@ public class ResultPartition implements BufferPoolOwner {
 
 	public int getNumberOfSubpartitions() {
 		return subpartitions.length;
+	}
+
+	public int getNumberOfConsumers() {
+		return numberOfConsumers;
 	}
 
 	public BufferProvider getBufferProvider() {

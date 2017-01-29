@@ -67,6 +67,8 @@ import java.io.IOException;
 public interface InputGate {
 
 	int getNumberOfInputChannels();
+	
+	int getConsumedSubpartitionIndex();
 
 	boolean isFinished();
 
@@ -79,4 +81,6 @@ public interface InputGate {
 	void registerListener(InputGateListener listener);
 
 	int getPageSize();
+
+	void notifySubpartitionConsumed() throws IOException, InterruptedException;
 }
